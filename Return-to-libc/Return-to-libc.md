@@ -1,7 +1,6 @@
 ## 3.2 SEED Lab (30 pts)
 Return-to-libc Attack Lab
-https://seedsecuritylabs.org/Labs_20.04/Software/Return_to_
-Libc/
+https://seedsecuritylabs.org/Labs_20.04/Software/Return_to_Libc/
 
 #### 2 Environment Setup
 
