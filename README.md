@@ -1,6 +1,67 @@
 # Information Security HW03
 
+- 41173058h
+- 鍾詠傑
+- Information Security HW03
+- [github](https://github.com/G36maid/ntnu-sec-hw03)
+
+## references
+
+- [Shellcode Development Lab](https://seedsecuritylabs.org/Labs_20.04/Software/Shellcode/)
+- [Return-to-libc](https://seedsecuritylabs.org/Labs_20.04/Software/Return-to-libc/)
+- [Wikipedia](https://en.wikipedia.org/wiki/Wikipedia)
+- claude 3.7 sonnet
+- chatgpt 4o
+
+## Table of Contents
+
 [TOC]
+
+## Project structure
+```
+. ── DASH
+│   └── setuid_program.c
+├── NX
+│   ├── Makefile
+│   ├── test_heap.c
+│   └── test_stack.c
+├── Password-Guess
+│   └── password_guess.c
+├── README.md
+├── Return-to-libc
+│   ├── change_env.sh
+│   ├── exploit.py
+│   ├── gdb_command.txt
+│   ├── image.png
+│   ├── Makefile
+│   ├── prtenv.c
+│   ├── retlib.c
+│   ├── Return-to-libc.md
+│   ├── task1_output.txt
+│   └── task1.png
+└── Shellcode
+    ├── another_sh64_bash.s
+    ├── another_sh64.s
+    ├── arm
+    │   ├── another_sh64.s
+    │   ├── hello.s
+    │   ├── Makefile
+    │   └── mysh64.s
+    ├── convert.py
+    ├── hello.s
+    ├── Makefile
+    ├── mysh64_bash.s
+    ├── mysh64_execve.s
+    ├── mysh64_no_zero.s
+    ├── mysh64.s
+    ├── Shellcode.md
+    ├── task1.png
+    ├── task2b_output.txt
+    ├── task2c.png
+    ├── task2.png
+    └── tesk2_output.txt
+```
+
 
 ## 3.1 SEED Lab (20 pts)
 [Shellcode Development Lab](https://seedsecuritylabs.org/Labs_20.04/Software/Shellcode/)
@@ -9,10 +70,6 @@
 see the code and documentation
 - code : [/Shellcode/](./Shellcode/)
 - documentation : [Shellcode/Shellcode.md](./Shellcode/Shellcode.md)
-
-## 3.1 SEED Lab (20 pts)
-Shellcode Development Lab
-https://seedsecuritylabs.org/Labs_20.04/Software/Shellcode/
 
 ### Task 1: Writing Assembly Code
 
@@ -118,7 +175,7 @@ $ xxd -p -c 20 hello.o
 Your task is to go through the entire process: compiling and running the sample code, and then get
 the machine code from the binary.
 
-![alt text](task1.png)
+![task1](Shellcode/task1.png)
 
 ### Task 2: Writing Shellcode (Approach 1)
 
@@ -255,7 +312,7 @@ quit -- Exit from gdb
     - `mov rdi, rbx` - Line 1 sets first arg (filename) to "/bin/sh" address
     - `lea rsi, [rbx+8]` - Line 2 sets second arg (argv) to address of argv array
 
-![task2](task2.png)
+![task2](Shellcode/task2.png)
 
 #### Task 2.b. Eliminate zeros from the code
 
@@ -364,7 +421,7 @@ argv[3] = 0
 ##### solution
 - code : `Shellcode/mysh64_bash.s`
 - screenshots :
-![task2c](task2c.png)
+![task2c](Shellcode/task2c.png)
 
 ```nasm
 section .text
@@ -431,7 +488,6 @@ Key changes made:
 6. Added proper null termination for all strings
 7. Created the complete argv array with all required pointers
 
-```
 
 This should execute bash with the command `echo hello; ls -la`, which will:
 1. Print "hello" to the console
@@ -443,7 +499,7 @@ The shellcode avoids null bytes by:
 - Using minimal registers where possible
 - Using `lea` for address calculations
 
-#### 3.4 Task 2.d. Pass environment variables
+#### Task 2.d. Pass environment variables
 
 The third parameter for the execve() system call is a pointer to the environment variable array, and it
 allows us to pass environment variables to the program. In our sample program, we pass a null pointer to
@@ -691,49 +747,6 @@ The first approach is more straightforward to understand initially, but the seco
 
 The main tradeoff is that the second approach might be slightly harder to read for beginners, but its benefits in terms of security and reliability make it the superior choice for actual exploitation scenarios.
 
-### 5 Guidelines: Getting Rid of Zeros
-
-There are many techniques that can get rid of zeros from the shellcode. In this section, we discuss some of the
-common techniques that you may find useful for this lab. Although the common ideas are the same for both
-amd64 and arm64 architectures, the instructions are different. In this section, we use amd64 instructions
-as examples. Students can working on Apple silicon machines can find the guidelines from this online
-document: Writing ARM64 shellcode (in Ubuntu).
-• If we want to assign zero to rax, we can use "mov rax, 0", but doing so, we will get zeros in the
-machine code. A typical way to solve this problem is to use "xor rax, rax", i.e., we xor rax
-with itself, the result is zero, which is saved to rax.
-• If we want to store 0x99 to rax. We cannot just use "mov rax, 0x99", because the second
-operand is expanded to 8 bytes, i.e., 0x0000000000000099, which contains seven zeros. To solve
-this problem, we can first set rax to zero, and then assign a one-byte number 0x99 to the al register,
-which represent the least significant 8 bits of the eax register.
-xor rax, rax
-mov al, 0x99
-• Another way is to use shift. Again, let us store 0x99 to rax. We first store 0xFFFFFFFFFFFF99 to
-rax. Second, we shift this register to the left for 56 bits; now rax contains 0x9900000000000000.
-Then we shift the register to the right for 56 bits; the most significant 56 bits (7 bytes) will be filled
-with 0x00. After that, rax will contain 0x00000000000099.
-mov rax, 0xFFFFFFFFFFFFFF99
-shl rax, 56
-shr rax, 56
-• Strings need to be terminated by zero, but if we define a string using the first line of the following,
-we will have a zero in the code. To solve this problem, we define a string using the second line, i.e.,
-putting a non-zero byte (0xFF) at the end of the string first.
-db ’abcdef’, 0x00
-db ’abcdef’, 0xFF
-After getting the address of the string, we can dynamically change the non-zero byte to 0x00. As-
-suming that we have saved the address of the string to rbx. We also know the length of the string
-(excluding the zero) is 6; Therefore, we can use the following instructions to replace the 0xFF with
-0x00.
-xor al, al
-mov [rbx+6], al
-SEED Labs – Shellcode Development Lab 9
-
-### 6 Submission
-
-You need to submit a detailed lab report, with screenshots, to describe what you have done and what you
-have observed. You also need to provide explanation to the observations that are interesting or surprising.
-Please also list the important code snippets followed by explanation. Simply attaching code without any
-explanation will not receive credits.
-
 ### A Using the shellcode in attacking code
 
 In actual attacks, we need to include the shellcode in our attacking code, such as a Python or C program.
@@ -781,7 +794,6 @@ shellcode= (
 ).encode(’latin-1’)
 ```
 
-
 ## 3.2 SEED Lab (30 pts)
 [Return-to-libc Attack Lab](https://seedsecuritylabs.org/Labs_20.04/Software/Return_to_Libc/)
 
@@ -790,13 +802,9 @@ see the code and documentation
 - code : [Return_to_Libc/](./Return_to_Libc/)
 - documentation : [Return_to_Libc/Return_to_Libc.md](./Return_to_Libc/Return_to_Libc.md)
 
-## 3.2 SEED Lab (30 pts)
-Return-to-libc Attack Lab
-https://seedsecuritylabs.org/Labs_20.04/Software/Return_to_Libc/
+### Environment Setup
 
-#### 2 Environment Setup
-
-##### 2.1 Note on x86 and x64 Architectures
+#### Note on x86 and x64 Architectures
 
 The return-to-libc attack on the x64 machines (64-bit) is much more difficult than that on the x86 machines
 (32-bit). Although the SEED Ubuntu 20.04 VM is a 64-bit machine, we decide to keep using the 32-bit
@@ -804,7 +812,7 @@ programs (x64 is compatible with x86, so 32-bit programs can still run on x64 ma
 may introduce a 64-bit version for this lab. Therefore, in this lab, when we compile programs using gcc,
 we always use the -m32 flag, which means compiling the program into 32-bit binary.
 
-##### 2.2 Turning off countermeasures
+#### Turning off countermeasures
 
 You can execute the lab tasks using our pre-built Ubuntu virtual machines. Ubuntu and other Linux dis-
 tributions have implemented several security mechanisms to make the buffer-overflow attack difficult. To
@@ -826,7 +834,7 @@ whether to make the stack of this running program executable or non-executable. 
 automatically by the recent versions of gcc, and by default, stacks are set to be non-executable. To change
 that, use the following option when compiling programs:
 
-```
+```bash
 For executable stack:
 $ gcc -m32 -z execstack -o test test.c
 For non-executable stack:
@@ -850,7 +858,7 @@ called zsh in our Ubuntu 16.04 VM. We use the following commands to link /bin/sh
 It should be noted that the countermeasure implemented in dash can be circumvented. We will do that
 in a later task.
 
-#### 2.3 The Vulnerable Program
+#### The Vulnerable Program
 
 Listing 1: The vulnerable program (retlib.c)
 
@@ -913,7 +921,7 @@ vulnerability, the user might be able to get a root shell. It should be noted th
 from a file called badfile, which is provided by users. Therefore, we can construct the file in a way such
 that when the vulnerable program copies the file contents into its buffer, a root shell can be spawned.
 
-##### Compilation
+#### Compilation
 
 Let us first compile the code and turn it into a root-owned Set-UID program. Do not forget
 
@@ -929,7 +937,7 @@ $ sudo chown root retlib
 $ sudo chmod 4755 retlib
 ```
 
-##### For instructors
+#### For instructors
 
 To prevent students from using the solutions from the past (or from those posted on the
 Internet), instructors can change the value for BUF SIZE by requiring students to compile the code using
@@ -938,9 +946,7 @@ a different BUF SIZE value. Without the -DBUF SIZE option, BUF SIZE is set to th
 will be different. Students should ask their instructors for the value of N. The value of N can be set in the
 provided Makefile and N can be from 10 to 800.
 
-### 3 Lab Tasks
-
-#### 3.1 Task 1: Finding out the Addresses of libc Functions
+### Task 1: Finding out the Addresses of libc Functions
 
 In Linux, when a program runs, the libc library will be loaded into memory. When the memory address
 randomization is turned off, for the same program, the library is always loaded in the same memory address
@@ -990,7 +996,7 @@ Breakpoint 1, 0x56556327 in main ()
 $1 = {<text variable, no debug info>} 0xf7e12420 <system>
 $2 = {<text variable, no debug info>} 0xf7e04f80 <exit>
 ```
-##### solution
+#### solution
 
 - code : `Return_to_Libc/retlib.c`
 - script : `Return_to_Libc/gdb_command.txt`
@@ -1005,10 +1011,10 @@ p exit
 quit
 ```
 
-![task1_screenshot.png](task1.png)
+![task1.png](Return-to-libc/task1.png)
 
 
-#### 3.2 Task 2: Putting the shell string in the memory
+### Task 2: Putting the shell string in the memory
 
 Our attack strategy is to jump to the system() function and get it to execute an arbitrary command.
 Since we would like to get a shell prompt, we want the system() function to execute the "/bin/sh"
@@ -1024,7 +1030,7 @@ shell variable MYSHELL, and let it contain the string "/bin/sh". From the follow
 verify that the string gets into the child process, and it is printed out by the env command running inside
 the child process.
 
-```
+```bash
 $ export MYSHELL=/bin/sh
 $ env | grep MYSHELL
 MYSHELL=/bin/sh
@@ -1046,13 +1052,13 @@ can verify that by putting the code above inside retlib.c. However, the length o
 make a difference. That’s why we choose 6 characters for the program name prtenv to match the length
 of retlib.
 
-##### Note
+#### Note
 
 You should use the -m32 flag when compiling the above program, so the binary code prtenv will
 be for 32-bit machines, instead of for 64-bit ones. The vulnerable program retlib is a 32-bit binary, so if
 prtenv is 64-bit, the address of the environment variable will be different.
 
-##### solution
+#### solution
 
 1. Set the Environment Variable
 
@@ -1127,7 +1133,7 @@ bffff7c4
 
 This address will be used in the next task to perform the return-to-libc attack.
 
-#### 3.3 Task 3: Launching the Attack
+### Task 3: Launching the Attack
 
 We are ready to create the content of badfile. Since the content involves some binary data (e.g., the
 address of the libc functions), we can use Python to do the construction. We provide a skeleton of the
@@ -1162,7 +1168,7 @@ You need to figure out the three addresses and the values for X, Y, and Z. If yo
 your attack might not work. In your report, you need to describe how you decide the values for X, Y and Z.
 Either show us your reasoning or, if you use a trial-and-error approach, show your trials.
 
-##### A note regarding gdb
+#### A note regarding gdb
 
 If you use gdb to figure out the values for X, Y, and Z, it should be noted that the
 gdb behavior in Ubuntu 20.04 is slightly different from that in Ubuntu 16.04. In particular, after we set a
@@ -1172,17 +1178,17 @@ value, not bof’s ebp. We need to type next to execute a few instructions and s
 is modified to point to the stack frame of the bof() function. The SEED book (2nd edition) is based on
 Ubuntu 16.04, so it does not have this next step.
 
-##### Attack variation 1: Is the exit() function really necessary? Please try your attack without including
+#### Attack variation 1: Is the exit() function really necessary? Please try your attack without including
 
 the address of this function in badfile. Run your attack again, report and explain your observations.
 
-##### Attack variation 2: After your attack is successful, change the file name of retlib to a different name
+#### Attack variation 2: After your attack is successful, change the file name of retlib to a different name
 
 making sure that the length of the new file name is different. For example, you can change it to newretlib.
 Repeat the attack (without changing the content of badfile). Will your attack succeed or not? If it does
 not succeed, explain why.
-##### solution
-###### 1 Find the Address of `"/bin/sh"`
+#### solution
+##### 1 Find the Address of `"/bin/sh"`
 1. Locate the string `"/bin/sh"` in the libc library:
    ```gdb
    find __libc_start_main,+9999999,"/bin/sh"
@@ -1195,7 +1201,7 @@ not succeed, explain why.
 
 ---
 
-###### Step 2: Determine the Offsets (X, Y, Z)
+##### Step 2: Determine the Offsets (X, Y, Z)
 The offsets `X`, `Y`, and `Z` depend on the layout of the stack and the structure of the payload. To determine these offsets:
 
 1. **Analyze the stack layout**:
@@ -1213,7 +1219,7 @@ For this example, let's assume the following offsets:
 
 ---
 
-###### Step 3: Update the Exploit Code
+##### Step 3: Update the Exploit Code
 Now that we have the addresses and offsets, we can update the exploit code:
 
 ```python
@@ -1245,7 +1251,7 @@ with open("badfile", "wb") as f:
 
 ---
 
-###### Step 4: Test the Exploit
+##### Step 4: Test the Exploit
 1. Run the vulnerable program with the crafted `badfile`:
    ```bash
    ./vulnerable_program < badfile
@@ -1297,7 +1303,7 @@ If you change the file name of the vulnerable program (e.g., from `retlib` to `n
 2. **File Name Change**: The attack may fail because the memory layout changes, causing the addresses and offsets to become invalid. This demonstrates the importance of precise memory layout knowledge in return-to-libc attacks.
 
 
-#### 3.4 Task 4: Defeat Shell’s Countermeasure
+### Task 4: Defeat Shell’s Countermeasure
 
 The goal of this task is to launch the return-to-libc attack after enabling the shell’s countermeasure. Before completing Tasks 1 to 3, we relinked `/bin/sh` to `/bin/zsh` instead of `/bin/dash` (the original setting). This is because some shell programs, such as `dash` and `bash`, have a countermeasure that automatically drops privileges when executed in a Set-UID process. In this task, we aim to bypass this countermeasure and obtain a root shell, even when `/bin/sh` points to `/bin/dash`.
 
@@ -1333,9 +1339,9 @@ To complete this task, construct your input so that when the `bof()` function re
 
 ---
 
-### Solution
+#### Solution
 
-#### Step 1: Determine the Required Addresses
+##### Step 1: Determine the Required Addresses
 
 1. **Address of `execv()`**
    Use `gdb` to find the address of the `execv()` function in the libc library:
@@ -1383,7 +1389,7 @@ To complete this task, construct your input so that when the `bof()` function re
 
 ---
 
-#### Step 2: Construct the Payload
+##### Step 2: Construct the Payload
 
 The payload must:
 1. Overwrite the return address to point to `execv()`.
@@ -1391,18 +1397,18 @@ The payload must:
    - `pathname`: Address of `/bin/bash`.
    - `argv[]`: Address of the argument array on the stack.
 
-##### 2.1 Layout of the Payload
+###### 2.1 Layout of the Payload
 The payload will look like this:
 ```
 [ Padding ] [ execv() address ] [ Return address (dummy) ] [ pathname ] [ argv[] ]
 [ argv[0] ] [ argv[1] ] [ argv[2] ]
 ```
 
-##### 2.2 Calculate Offsets
+###### 2.2 Calculate Offsets
 Use `gdb` to determine the offset to the return address. For example, if the return address is at offset `112`, the payload will start with `112` bytes of padding.
 
-##### 2.3 Construct the Argument Array
-The `argv[]` array must be constructed on the stack:
+###### 2.3 Construct the Argument Array
+The# `argv[]` array must be constructed on the stack:
 - `argv[0]`: Address of `/bin/bash` (`0xf7f52a0b`).
 - `argv[1]`: Address of `-p` (`0xf7f52b0c`).
 - `argv[2]`: `NULL` (4 bytes of zero).
@@ -1411,7 +1417,7 @@ Assume the `argv[]` array is placed at `0xffffd0c0` (just after the padding).
 
 ---
 
-#### Step 3: Write the Exploit Code
+##### Step 3: Write the Exploit Code
 
 Here is the Python script to generate the payload:
 
@@ -1471,7 +1477,7 @@ with open("badfile", "wb") as f:
 
 ---
 
-#### Step 4: Test the Exploit
+##### Step 4: Test the Exploit
 
 1. Run the vulnerable program with the crafted `badfile`:
    ```bash
@@ -1537,9 +1543,9 @@ on how to use the generic ROP technique to solve the problem in Task 4. It invol
 four times, followed by an invocation of setuid(0), before invoking system("/bin/sh") to give us
 the root shell. The method is quite complicated and takes 15 pages to explain in the SEED book.
 
-### 4 Guidelines: Understanding the Function Call Mechanism
+### Guidelines: Understanding the Function Call Mechanism
 
-#### 4.1 Understanding the stack layout
+#### Understanding the stack layout
 
 To know how to conduct Return-to-libc attacks, we need to understand how stacks work. We use a small C
 program to understand the effects of a function invocation on the stack. More detailed explanation can be
