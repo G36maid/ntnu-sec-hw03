@@ -1,0 +1,150 @@
+[04/20/25]seed@VM:~/.../Labsetup$ gdb mysh64
+GNU gdb (Ubuntu 9.2-0ubuntu1~20.04) 9.2
+Copyright (C) 2020 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+Type "show copying" and "show warranty" for details.
+This GDB was configured as "x86_64-linux-gnu".
+Type "show configuration" for configuration details.
+For bug reporting instructions, please see:
+<http://www.gnu.org/software/gdb/bugs/>.
+Find the GDB manual and other documentation resources online at:
+    <http://www.gnu.org/software/gdb/documentation/>.
+
+For help, type "help".
+Type "apropos word" to search for commands related to "word"...
+/opt/gdbpeda/lib/shellcode.py:24: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if sys.version_info.major is 3:
+/opt/gdbpeda/lib/shellcode.py:379: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if pyversion is 3:
+Reading symbols from mysh64...
+gdb-peda$ help
+List of classes of commands:
+
+aliases -- Aliases of other commands.
+breakpoints -- Making program stop at certain points.
+data -- Examining data.
+files -- Specifying and examining files.
+internals -- Maintenance commands.
+obscure -- Obscure features.
+running -- Running the program.
+status -- Status inquiries.
+support -- Support facilities.
+tracepoints -- Tracing of program execution without stopping the program.
+user-defined -- User-defined commands.
+
+Type "help" followed by a class name for a list of commands in that class.
+Type "help all" for the list of all commands.
+Type "help" followed by command name for full documentation.
+Type "apropos word" to search for commands related to "word".
+Type "apropos -v word" for full documentation of commands related to "word".
+Command name abbreviations are allowed if unambiguous.
+gdb-peda$ break one
+Breakpoint 1 at 0x400082
+gdb-peda$ run
+Starting program: /home/seed/ntnu-sec-hw03/Labsetup/mysh64
+[----------------------------------registers-----------------------------------]
+RAX: 0x0
+RBX: 0x0
+RCX: 0x0
+RDX: 0x0
+RSI: 0x0
+RDI: 0x0
+RBP: 0x0
+RSP: 0x7fffffffe498 --> 0x4000ad --> 0xff68732f6e69622f
+RIP: 0x400082 --> 0x8948074388c0305b
+R8 : 0x0
+R9 : 0x0
+R10: 0x0
+R11: 0x0
+R12: 0x0
+R13: 0x0
+R14: 0x0
+R15: 0x0
+EFLAGS: 0x202 (carry parity adjust zero sign trap INTERRUPT direction overflow)
+[-------------------------------------code-------------------------------------]
+   0x40007c:    add    BYTE PTR [rax],al
+   0x40007e:    add    BYTE PTR [rax],al
+   0x400080 <_start>:   jmp    0x4000a8 <two>
+=> 0x400082 <one>:      pop    rbx
+   0x400083 <one+1>:    xor    al,al
+   0x400085 <one+3>:    mov    BYTE PTR [rbx+0x7],al
+   0x400088 <one+6>:    mov    QWORD PTR [rbx+0x8],rbx
+   0x40008c <one+10>:   mov    eax,0x0
+[------------------------------------stack-------------------------------------]
+0000| 0x7fffffffe498 --> 0x4000ad --> 0xff68732f6e69622f
+0008| 0x7fffffffe4a0 --> 0x1
+0016| 0x7fffffffe4a8 --> 0x7fffffffe6fe ("/home/seed/ntnu-sec-hw03/Labsetup/mysh64")
+0024| 0x7fffffffe4b0 --> 0x0
+0032| 0x7fffffffe4b8 --> 0x7fffffffe727 ("SHELL=/bin/bash")
+0040| 0x7fffffffe4c0 --> 0x7fffffffe737 ("PWD=/home/seed/ntnu-sec-hw03/Labsetup")
+0048| 0x7fffffffe4c8 --> 0x7fffffffe75d ("LOGNAME=seed")
+0056| 0x7fffffffe4d0 --> 0x7fffffffe76a ("XDG_SESSION_TYPE=tty")
+[------------------------------------------------------------------------------]
+Legend: code, data, rodata, value
+
+Breakpoint 1, 0x0000000000400082 in one ()
+gdb-peda$ step
+[----------------------------------registers-----------------------------------]
+RAX: 0x0
+RBX: 0x4000ad --> 0xff68732f6e69622f
+RCX: 0x0
+RDX: 0x0
+RSI: 0x0
+RDI: 0x0
+RBP: 0x0
+RSP: 0x7fffffffe4a0 --> 0x1
+RIP: 0x400083 --> 0x5b8948074388c030
+R8 : 0x0
+R9 : 0x0
+R10: 0x0
+R11: 0x0
+R12: 0x0
+R13: 0x0
+R14: 0x0
+R15: 0x0
+EFLAGS: 0x10202 (carry parity adjust zero sign trap INTERRUPT direction overflow)
+[-------------------------------------code-------------------------------------]
+   0x40007d:    add    BYTE PTR [rax],al
+   0x40007f:    add    bl,ch
+   0x400081 <_start+1>: es pop rbx
+=> 0x400083 <one+1>:    xor    al,al
+   0x400085 <one+3>:    mov    BYTE PTR [rbx+0x7],al
+   0x400088 <one+6>:    mov    QWORD PTR [rbx+0x8],rbx
+   0x40008c <one+10>:   mov    eax,0x0
+   0x400091 <one+15>:   mov    QWORD PTR [rbx+0x10],rax
+[------------------------------------stack-------------------------------------]
+0000| 0x7fffffffe4a0 --> 0x1
+0008| 0x7fffffffe4a8 --> 0x7fffffffe6fe ("/home/seed/ntnu-sec-hw03/Labsetup/mysh64")
+0016| 0x7fffffffe4b0 --> 0x0
+0024| 0x7fffffffe4b8 --> 0x7fffffffe727 ("SHELL=/bin/bash")
+0032| 0x7fffffffe4c0 --> 0x7fffffffe737 ("PWD=/home/seed/ntnu-sec-hw03/Labsetup")
+0040| 0x7fffffffe4c8 --> 0x7fffffffe75d ("LOGNAME=seed")
+0048| 0x7fffffffe4d0 --> 0x7fffffffe76a ("XDG_SESSION_TYPE=tty")
+0056| 0x7fffffffe4d8 --> 0x7fffffffe77f ("_=/usr/bin/gdb")
+[------------------------------------------------------------------------------]
+Legend: code, data, rodata, value
+0x0000000000400083 in one ()
+gdb-peda$ print $rbx
+$1 = 0x4000ad
+gdb-peda$ x/40bx <addr>
+A syntax error in expression, near `<addr>'.
+gdb-peda$ x/40bx 0x4000ad
+0x4000ad:       0x2f    0x62    0x69    0x6e    0x2f    0x73    0x68    0xff
+0x4000b5:       0x41    0x41    0x41    0x41    0x41    0x41    0x41    0x41
+0x4000bd:       0x42    0x42    0x42    0x42    0x42    0x42    0x42    0x42
+0x4000c5:       0x00    0x00    0x00    0x01    0x00    0x00    0x00    0x00
+0x4000cd:       0x00    0x12    0x00    0x0a    0x00    0x00    0x00    0x01
+gdb-peda$ x/40bx $rsp
+0x7fffffffe4a0: 0x01    0x00    0x00    0x00    0x00    0x00    0x00    0x00
+0x7fffffffe4a8: 0xfe    0xe6    0xff    0xff    0xff    0x7f    0x00    0x00
+0x7fffffffe4b0: 0x00    0x00    0x00    0x00    0x00    0x00    0x00    0x00
+0x7fffffffe4b8: 0x27    0xe7    0xff    0xff    0xff    0x7f    0x00    0x00
+0x7fffffffe4c0: 0x37    0xe7    0xff    0xff    0xff    0x7f    0x00    0x00
+gdb-peda$ x/5gx $rsp
+0x7fffffffe4a0: 0x0000000000000001      0x00007fffffffe6fe
+0x7fffffffe4b0: 0x0000000000000000      0x00007fffffffe727
+0x7fffffffe4c0: 0x00007fffffffe737
+gdb-peda$ quit
+[04/20/25]seed@VM:~/.../Labsetup$
