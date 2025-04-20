@@ -63,49 +63,53 @@ in a later task.
 Listing 1: The vulnerable program (retlib.c)
 
 ```c
-# include <stdlib.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 
-# include <stdio.h>
-
-# include <string.h>
-
-# ifndef BUF_SIZE
-
-# define BUF_SIZE 12
-
-# endif
+#ifndef BUF_SIZE
+#define BUF_SIZE 12
+#endif
 
 int bof(char *str)
 {
-char buffer[BUF_SIZE];
-unsigned int *framep;
-// Copy ebp into framep
-asm("movl %%ebp, %0" : "=r" (framep));
-/* print out information for experiment purpose*/
-printf("Address of buffer[] inside bof(): 0x%.8x\n", (unsigned)buffer);
-printf("Frame Pointer value inside bof(): 0x%.8x\n", (unsigned)framep);
-strcpy(buffer, str);fi buffer overflow!
-return 1;
+    char buffer[BUF_SIZE];
+    unsigned int *framep;
+
+    // Copy ebp into framep
+    asm("movl %%ebp, %0" : "=r" (framep));
+
+    /* print out information for experiment purpose */
+    printf("Address of buffer[] inside bof():  0x%.8x\n", (unsigned)buffer);
+    printf("Frame Pointer value inside bof():  0x%.8x\n", (unsigned)framep);
+
+    strcpy(buffer, str);
+
+    return 1;
 }
+
+void foo(){
+    static int i = 1;
+    printf("Function foo() is invoked %d times\n", i++);
+    return;
+}
+
 int main(int argc, char **argv)
 {
-char input[1000];
-FILE *badfile;
-badfile = fopen("badfile", "r");
-int length = fread(input, sizeof(char), 1000, badfile);
-printf("Address of input[] inside main(): 0x%x\n", (unsigned int) input);
-printf("Input size: %d\n", length);
-SEED Labs – Return-to-libc Attack Lab 4
-bof(input);
-printf("(ˆ_ˆ)(ˆ_ˆ) Returned Properly (ˆ_ˆ)(ˆ_ˆ)\n");
-return 1;
+   char input[1000];
+   FILE *badfile;
+
+   badfile = fopen("badfile", "r");
+   int length = fread(input, sizeof(char), 1000, badfile);
+   printf("Address of input[] inside main():  0x%x\n", (unsigned int) input);
+   printf("Input size: %d\n", length);
+
+   bof(input);
+
+   printf("(^_^)(^_^) Returned Properly (^_^)(^_^)\n");
+   return 1;
 }
-// This function will be used in the optional task
-void foo(){
-static int i = 1;
-printf("Function foo() is invoked %d times\n", i++);
-return;
-}
+
 ```
 
 The above program has a buffer overflow vulnerability. It first reads an input up to 1000 bytes from
@@ -194,6 +198,23 @@ Breakpoint 1, 0x56556327 in main ()
 $1 = {<text variable, no debug info>} 0xf7e12420 <system>
 $2 = {<text variable, no debug info>} 0xf7e04f80 <exit>
 ```
+##### solution
+
+- code : `Return_to_Libc/retlib.c`
+- script : `Return_to_Libc/gdb_command.txt`
+- output : `Return_to_Libc/task1_output.txt`
+- screenshot : `Return_to_Libc/task1_screenshot.png`
+
+```gdb_command.txt
+break main
+run
+p system
+p exit
+quit
+```
+
+![task1_screenshot.png](task1.png)
+
 
 #### 3.2 Task 2: Putting the shell string in the memory
 
@@ -219,15 +240,13 @@ MYSHELL=/bin/sh
 
 We will use the address of this variable as an argument to system() call. The location of this variable
 in the memory can be found out easily using the following program:
-
 ```
 void main(){
-char* shell = getenv("MYSHELL");
-if (shell)
-printf("%x\n", (unsigned int)shell);
+    char* shell = getenv("MYSHELL");
+    if (shell)
+        printf("%x\n", (unsigned int)shell);
 }
 ```
-
 Compile the code above into a binary called prtenv. If the address randomization is turned off, you
 will find out that the same address is printed out. When you run the vulnerable program retlib inside the
 same terminal, the address of the environment variable will be the same (see the special note below). You
@@ -240,6 +259,121 @@ of retlib.
 You should use the -m32 flag when compiling the above program, so the binary code prtenv will
 be for 32-bit machines, instead of for 64-bit ones. The vulnerable program retlib is a 32-bit binary, so if
 prtenv is 64-bit, the address of the environment variable will be different.
+
+##### solution
+
+1. **Set the Environment Variable**
+
+   Create a shell script `change_env.sh` to set the environment variable `MYSHELL` to `/bin/sh`:
+
+   ```bash
+   #!/bin/bash
+   export MYSHELL=/bin/sh
+   env | grep MYSHELL
+   MYSHELL=/bin/sh
+
+   ```
+
+   Save the script as `change_env.sh` and make it executable:
+
+   ```bash
+   chmod +x change_env.sh
+   ```
+
+   Run the script to set the environment variable:
+
+   ```bash
+   ./change_env.sh
+   ```
+
+2. Print the Address of the Environment Variable**
+
+   Create a C program `prtenv.c` to retrieve and print the memory address of the `MYSHELL` environment variable:
+
+   ```c
+   #include <stdio.h>
+   #include <stdlib.h>
+
+   void main() {
+       // Get the address of the MYSHELL environment variable
+       char* shell = getenv("MYSHELL");
+       if (shell) {
+           // Print the address of the environment variable
+           printf("%x\n", (unsigned int)shell);
+       }
+   }
+   ```
+
+3. **Compile the Program**
+
+   Compile the program as a 32-bit binary using the `-m32` flag to ensure compatibility with the vulnerable program `retlib`:
+
+   ```bash
+   gcc -m32 -o prtenv prtenv.c
+   ```
+
+4. **Run the Program to Get the Address**
+
+   Execute the compiled program `prtenv` to retrieve the memory address of the `MYSHELL` environment variable:
+
+   ```bash
+   ./prtenv
+   ```
+
+   The output will be the memory address of the `MYSHELL` environment variable, which contains the string `/bin/sh`. For example:
+
+   ```
+   bffff7c4
+   ```
+
+   This address (`0xbffff7c4` in this example) will be used as an argument to the `system()` function in the return-to-libc attack.
+
+5. **Verify Address Consistency**
+
+   To ensure the address of the `MYSHELL` environment variable remains consistent:
+   - Run the vulnerable program (`retlib`) in the same terminal session where you executed `prtenv`.
+   - Ensure that the name of the `prtenv` binary matches the length of the `retlib` binary (both should have 6 characters).
+
+6. **Disable Address Randomization (Optional)**
+
+   If Address Space Layout Randomization (ASLR) is enabled on your system, the address of the environment variable may change between runs. To disable ASLR temporarily, use:
+
+   ```bash
+   sudo sysctl -w kernel.randomize_va_space=0
+   ```
+
+   To re-enable ASLR after completing the lab, use:
+
+   ```bash
+   sudo sysctl -w kernel.randomize_va_space=2
+   ```
+
+7. **Ensure 32-bit Compatibility**
+
+   If you encounter issues with missing 32-bit libraries, install them using:
+
+   ```bash
+   sudo apt-get install gcc-multilib
+   ```
+
+---
+
+### **Final Output**
+
+After completing the above steps, you will have:
+1. The environment variable `MYSHELL` set to `/bin/sh`.
+2. The memory address of the `MYSHELL` environment variable printed by `prtenv`.
+
+For example:
+
+```
+MYSHELL=/bin/sh
+bffff7c4
+```
+
+This address will be used in the next task to perform the return-to-libc attack.
+
+
 
 #### 3.3 Task 3: Launching the Attack
 

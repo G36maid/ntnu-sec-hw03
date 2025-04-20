@@ -1,0 +1,47 @@
+[04/20/25]seed@VM:~/.../Return-to-libc$ gdb -q retlib
+/opt/gdbpeda/lib/shellcode.py:24: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if sys.version_info.major is 3:
+/opt/gdbpeda/lib/shellcode.py:379: SyntaxWarning: "is" with a literal. Did you mean "=="?
+  if pyversion is 3:
+Reading symbols from retlib...
+(No debugging symbols found in retlib)
+gdb-peda$ break main
+Breakpoint 1 at 0x12ef
+gdb-peda$ run
+Starting program: /home/seed/ntnu-sec-hw03/Return-to-libc/retlib
+[----------------------------------registers-----------------------------------]
+EAX: 0xf7fb6808 --> 0xffffd5ac --> 0xffffd71b ("SHELL=/bin/bash")
+EBX: 0x0
+ECX: 0xad0939a1
+EDX: 0xffffd534 --> 0x0
+ESI: 0xf7fb4000 --> 0x1e6d6c
+EDI: 0xf7fb4000 --> 0x1e6d6c
+EBP: 0x0
+ESP: 0xffffd50c --> 0xf7debee5 (<__libc_start_main+245>:        add    esp,0x10)
+EIP: 0x565562ef (<main>:        endbr32)
+EFLAGS: 0x246 (carry PARITY adjust ZERO sign trap INTERRUPT direction overflow)
+[-------------------------------------code-------------------------------------]
+   0x565562ea <foo+58>: mov    ebx,DWORD PTR [ebp-0x4]
+   0x565562ed <foo+61>: leave
+   0x565562ee <foo+62>: ret
+=> 0x565562ef <main>:   endbr32
+   0x565562f3 <main+4>: lea    ecx,[esp+0x4]
+   0x565562f7 <main+8>: and    esp,0xfffffff0
+   0x565562fa <main+11>:        push   DWORD PTR [ecx-0x4]
+   0x565562fd <main+14>:        push   ebp
+[------------------------------------stack-------------------------------------]
+0000| 0xffffd50c --> 0xf7debee5 (<__libc_start_main+245>:       add    esp,0x10)
+0004| 0xffffd510 --> 0x1
+0008| 0xffffd514 --> 0xffffd5a4 --> 0xffffd6ec ("/home/seed/ntnu-sec-hw03/Return-to-libc/retlib")
+0012| 0xffffd518 --> 0xffffd5ac --> 0xffffd71b ("SHELL=/bin/bash")
+0016| 0xffffd51c --> 0xffffd534 --> 0x0
+0020| 0xffffd520 --> 0xf7fb4000 --> 0x1e6d6c
+0024| 0xffffd524 --> 0xf7ffd000 --> 0x2bf24
+0028| 0xffffd528 --> 0xffffd588 --> 0xffffd5a4 --> 0xffffd6ec ("/home/seed/ntnu-sec-hw03/Return-to-libc/retlib")
+[------------------------------------------------------------------------------]
+Legend: code, data, rodata, value
+
+Breakpoint 1, 0x565562ef in main ()
+gdb-peda$ p system
+$1 = {<text variable, no debug info>} 0xf7e12420 <system>
+gdb-peda$ quit
