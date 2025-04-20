@@ -3,7 +3,7 @@
 - 41173058h
 - 鍾詠傑
 - Information Security HW03
-- [github](https://github.com/G36maid/ntnu-sec-hw03)
+- [github repo](https://github.com/G36maid/ntnu-sec-hw03)
 
 ## references
 
