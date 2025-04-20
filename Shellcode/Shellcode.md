@@ -144,8 +144,8 @@ register to get their addresses. We focus on this approach in the next task.
 We provide a sample shellcode below. This code is for the amd64 architecture. The code can also be found
 in the Labsetup folder. If you are working on this lab on an Apple silicon machine, you can find the
 sample arm64 code in the arm sub-folder.
-
-```Listing 2: A smaple 64-bit shellcode (mysh64.s)
+Listing 2: A sample 64-bit shellcode (mysh64.s)
+```
 section .text
 global _start
 _start:
