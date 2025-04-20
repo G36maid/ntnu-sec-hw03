@@ -350,7 +350,9 @@ argv[2] = address of the command string "echo hello; ls -la"
 argv[3] = 0
 ```
 ##### solution
-code 
+- code : `Shellcode/mysh64_bash.s`
+- screenshots :
+![task2c](task2c.png)
 
 ```nasm
 section .text
@@ -453,7 +455,6 @@ bbb=world
 ccc=hello world
 ```
 
-SEED Labs – Shellcode Development Lab 7
 To write such a shellcode, we need to construct an environment variable array on the stack, and store the
 address of this array to the rdx register, before invoking execve(). The way to construct this array on
 the stack is exactly the same as the way how we construct the argv[] array. See the following:
