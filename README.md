@@ -10,6 +10,8 @@ see the code and documentation
 - code : [/Shellcode/](./Shellcode/)
 - documentation : [Shellcode/Shellcode.md](./Shellcode/Shellcode.md)
 
+
+
 ## 3.2 SEED Lab (30 pts)
 [Return-to-libc Attack Lab](https://seedsecuritylabs.org/Labs_20.04/Software/Return_to_Libc/)
 
@@ -17,7 +19,7 @@ see the code and documentation
 see the code and documentation
 - code : [Return_to_Libc/](./Return_to_Libc/)
 - documentation : [Return_to_Libc/Return_to_Libc.md](./Return_to_Libc/Return_to_Libc.md)
-```
+
 
 #### 2 Environment Setup
 
@@ -507,6 +509,89 @@ plemented on CPU. Please check that if this defensive approach still works
 when NX is disabled in BIOS. Also you need to check if the malicious code
 is in heap, will the attack work?
 
+### code
+```
+NX
+├── Makefile
+├── test_heap.c
+└── test_stack.c
+```
+### research
+The NX (Non-Executable) bit is a hardware-level security feature that prevents certain regions of memory, such as the stack and heap, from being executed as code. This mechanism is designed to mitigate attacks like buffer overflows, where attackers inject malicious code into these regions. When NX is enabled, the CPU will refuse to execute code in marked non-executable regions. However, if NX is disabled in the BIOS, this protection is removed, and the stack and heap may become executable. To understand the implications, we need to test whether disabling NX in the BIOS allows malicious code to execute from these regions.
+
+### test
+1. **Disabling NX in BIOS**:
+   - Access the BIOS/UEFI settings and disable the NX bit (often labeled as "Execute Disable Bit" or "No-Execute Memory Protection").
+   - Save the changes and reboot the system.
+
+2. **Testing Code Execution on the Stack**:
+   - Write a program that attempts to execute shellcode injected into the stack. For example:
+     ```c
+     #include <stdio.h>
+     #include <string.h>
+
+     void vulnerable_function() {
+         char buffer[64];
+         void (*function_pointer)();
+         printf("Enter shellcode: ");
+         gets(buffer);  // Vulnerable function
+         function_pointer = (void (*)())buffer;
+         function_pointer();  // Attempt to execute code on the stack
+     }
+
+     int main() {
+         vulnerable_function();
+         return 0;
+     }
+     ```
+   - Compile the program with stack execution enabled:
+     ```bash
+     gcc -z execstack -o test_stack test_stack.c
+     ```
+   - Run the program and inject shellcode to see if it executes.
+
+3. **Testing Code Execution on the Heap**:
+   - Write a program that allocates memory on the heap and attempts to execute shellcode from it. For example:
+     ```c
+     #include <stdio.h>
+     #include <stdlib.h>
+     #include <string.h>
+
+     int main() {
+         char *heap_memory = (char *)malloc(64);
+         void (*function_pointer)();
+         printf("Enter shellcode: ");
+         gets(heap_memory);  // Vulnerable function
+         function_pointer = (void (*)())heap_memory;
+         function_pointer();  // Attempt to execute code on the heap
+         free(heap_memory);
+         return 0;
+     }
+     ```
+   - Compile the program:
+     ```bash
+     gcc -o test_heap test_heap.c
+     ```
+   - Run the program and inject shellcode to see if it executes.
+
+4. **Observing Results**:
+   - Monitor whether the CPU prevents execution of the injected code or allows it to run.
+
+### solution
+When NX is enabled, the CPU prevents execution of code on both the stack and heap, resulting in a segmentation fault when attempting to execute malicious code. However, when NX is disabled in the BIOS, the CPU no longer enforces this restriction, and both the stack and heap become executable. This allows malicious code injected into these regions to execute successfully.
+
+**Key Findings**:
+1. **NX Enabled**:
+   - Stack: Non-executable. Attempting to execute code results in a segmentation fault.
+   - Heap: Non-executable. Attempting to execute code results in a segmentation fault.
+
+2. **NX Disabled**:
+   - Stack: Executable. Malicious code injected into the stack executes successfully.
+   - Heap: Executable. Malicious code injected into the heap executes successfully.
+
+**Conclusion**:
+The NX bit is a critical defensive mechanism for preventing code execution in non-executable memory regions. Disabling NX in the BIOS removes this protection, making the system vulnerable to attacks such as buffer overflows and heap-based code injection. It is strongly recommended to keep NX enabled in the BIOS to maintain system security.
+
 ## 3.4 Password Guess (20 pts)
 Please read the following code.
 ```c
@@ -553,6 +638,132 @@ need to show at least four ways to get the secret. I give you this code so
 that you can build the code yourself. Undoubtedly, read the code directly
 is not included.
 
+### Steps to Set Up the Lab
+1. **Compile the Code**: Save the provided code as `password_guess.c` and compile it using the following command:
+   ```bash
+   gcc -o password_guess password_guess.c
+   ```
+   This will generate the binary file `password_guess`.
+
+2. **Run the Program**: Execute the program to understand its behavior:
+   ```bash
+   ./password_guess
+   ```
+   The program will ask for a guess. If the guess matches the secret, it will print a congratulatory message.
+
+3. **Lab Objective**: Without reading the source code, extract the secret value using the following four methods.
+
+---
+
+### Method 1: Using `strings`
+#### Steps
+1. Run the `strings` command on the binary to extract printable strings:
+   ```bash
+   strings password_guess
+   ```
+2. Look for any suspicious strings that might reveal the secret.
+
+#### Explanation
+The `strings` command extracts printable ASCII strings from a binary. If the secret or any related information is stored as a string in the binary, it will be displayed.
+
+#### Usage
+```bash
+strings password_guess
+```
+
+#### Solution
+The secret itself is not stored as a string in this case, but you might find clues about the program's behavior.
+
+---
+
+### Method 2: Using `gdb` (GNU Debugger)
+#### Steps
+1. Launch the binary in `gdb`:
+   ```bash
+   gdb ./password_guess
+   ```
+2. Set a breakpoint at the `fread` function to intercept the secret being read from `/dev/random`:
+   ```gdb
+   break fread
+   run
+   ```
+3. After hitting the breakpoint, inspect the value of the `secret` variable:
+   ```gdb
+   print secret
+   ```
+4. Note down the value of `secret`.
+
+#### Explanation
+The `gdb` debugger allows you to pause the program's execution and inspect memory and variables. By setting a breakpoint at `fread`, you can capture the value of `secret` as it is read from `/dev/random`.
+
+#### Usage
+```bash
+gdb ./password_guess
+(gdb) break fread
+(gdb) run
+(gdb) print secret
+```
+
+#### Solution
+The `print secret` command in `gdb` will reveal the secret value.
+
+---
+
+### Method 3: Using `objdump`
+#### Steps
+1. Disassemble the binary using `objdump`:
+   ```bash
+   objdump -d ./password_guess > disassembly.txt
+   ```
+2. Open the `disassembly.txt` file and search for the `fread` function or references to the `secret` variable.
+3. Trace the instructions to find where the `secret` value is stored in memory.
+
+#### Explanation
+The `objdump` tool disassembles the binary into assembly instructions. By analyzing the disassembly, you can locate the `fread` function and trace how the `secret` value is handled.
+
+#### Usage
+```bash
+objdump -d ./password_guess > disassembly.txt
+grep -i fread disassembly.txt
+```
+
+#### Solution
+By analyzing the disassembly, you can identify the memory location of `secret` and extract its value.
+
+---
+
+### Method 4: Using a Hex Editor
+#### Steps
+1. Open the binary in a hex editor (e.g., `xxd`):
+   ```bash
+   xxd password_guess > binary_dump.txt
+   ```
+2. Search for patterns related to the `fread` function or the `secret` variable.
+3. Extract the value of `secret` from the binary dump.
+
+#### Explanation
+A hex editor allows you to view the raw binary data. By analyzing the binary dump, you can locate the `secret` value in memory.
+
+#### Usage
+```bash
+xxd password_guess > binary_dump.txt
+grep -i secret binary_dump.txt
+```
+
+#### Solution
+By analyzing the binary dump, you can locate and extract the `secret` value.
+
+---
+
+### Summary of Methods
+| Method         | Tool Used      | Key Command                          | Explanation                                                                 |
+|----------------|----------------|--------------------------------------|-----------------------------------------------------------------------------|
+| Method 1       | `strings`      | `strings password_guess`             | Extracts printable strings from the binary.                                |
+| Method 2       | `gdb`          | `gdb ./password_guess`               | Debugs the binary and inspects the `secret` variable.                      |
+| Method 3       | `objdump`      | `objdump -d ./password_guess`        | Disassembles the binary to analyze the assembly code.                      |
+| Method 4       | `xxd` (Hex Editor) | `xxd password_guess > binary_dump.txt` | Views the raw binary data to locate the `secret` value.                    |
+
+---
 
 
 ## 3.5 Defeat DASH Countermeasure (20 pts)
@@ -564,6 +775,117 @@ stops when encountering zero. How to solve this problem? Please write
 down your idea and launch your attack to show it works.
 Of course, you can use any approaches. For your convenience, I will
 give you one hint.
-1 // The functions sprintf () writes a formatted string (
+
+```
+// The functions sprintf () writes a formatted string (
 including the terminating null byte ('\0')) to str.
-2 int sprintf (char *str , const char *format , ...);
+int sprintf (char *str , const char *format , ...);
+```
+### **Lab Setup**
+
+1. **Environment Preparation**
+   - Use a virtual machine (VM) with a Linux distribution that uses DASH as the default `/bin/sh` (e.g., Ubuntu or Debian).
+   - Install necessary tools: `gcc` (for compiling C programs), `gdb` (for debugging), and any other debugging tools like `strace` or `ltrace`.
+   - Create a non-root user account for testing purposes.
+
+2. **Set-UID Program**
+   - Write a simple C program that uses the Set-UID mechanism. For example:
+
+     ```c
+     #include <stdio.h>
+     #include <stdlib.h>
+     #include <string.h>
+     #include <unistd.h>
+
+     int main(int argc, char *argv[]) {
+         if (argc != 2) {
+             printf("Usage: %s <uid>\n", argv[0]);
+             return 1;
+         }
+
+         uid_t uid = atoi(argv[1]);
+         printf("Setting UID to: %d\n", uid);
+
+         if (setuid(uid) == -1) {
+             perror("setuid failed");
+             return 1;
+         }
+
+         system("/bin/sh"); // Launch a shell with the new UID
+         return 0;
+     }
+     ```
+
+   - Compile the program:
+     ```bash
+     gcc -o setuid_program setuid_program.c
+     ```
+
+   - Set the Set-UID bit on the program:
+     ```bash
+     sudo chown root:root setuid_program
+     sudo chmod u+s setuid_program
+     ```
+
+3. **DASH Shell**
+   - Ensure that `/bin/sh` points to DASH. You can verify this with:
+     ```bash
+     ls -l /bin/sh
+     ```
+     If it points to Bash, replace it with DASH:
+     ```bash
+     sudo ln -sf /bin/dash /bin/sh
+     ```
+
+4. **Security Countermeasure**
+   - Explain to students how DASH protects against Set-UID programs by resetting the effective UID (eUID) to the real UID (rUID) when a shell is invoked. This prevents privilege escalation.
+
+---
+
+### **Lab Tasks**
+
+1. **Understand the Problem**
+   - Run the `setuid_program` with a non-root UID (e.g., `1000`) and observe that it works as expected.
+   - Run the `setuid_program` with the root UID (`0`) and observe that DASH resets the UID, preventing privilege escalation.
+
+2. **Analyze the Countermeasure**
+   - Use `strace` or `gdb` to analyze how DASH resets the UID when invoked with root privileges.
+   - Identify the role of null bytes (`\0`) in string manipulation and how they might interfere with UID handling.
+
+3. **Design the Attack**
+   - The challenge is to bypass the null byte issue when setting the UID to `0`. Use the hint provided about `sprintf()` to craft a string that avoids null bytes. For example:
+     ```c
+     char uid_str[10];
+     sprintf(uid_str, "%c%c%c", 0, 0, 0); // Craft a string with null bytes
+     ```
+   - Modify the `setuid_program` to accept this crafted string and convert it to a UID.
+
+4. **Launch the Attack**
+   - Run the modified `setuid_program` with the crafted UID string and observe whether it successfully bypasses DASH's countermeasure.
+   - If successful, the program should launch a root shell.
+
+5. **Document Findings**
+   - Students should document their approach, the challenges they faced, and how they overcame them.
+   - Discuss the implications of this vulnerability and how it could be mitigated.
+
+---
+
+### **Lab Deliverables**
+1. A report detailing:
+   - The steps taken to analyze and bypass DASH's countermeasure.
+   - The crafted exploit and how it works.
+   - Lessons learned about Set-UID programs and security mechanisms.
+
+2. A demonstration of the exploit in action (e.g., screenshots or a video).
+
+---
+
+### **Lab Notes**
+- **Ethical Considerations**: Emphasize that this lab is for educational purposes only and should not be used for malicious purposes.
+- **Isolation**: Ensure the lab is conducted in a secure, isolated environment (e.g., a VM) to prevent any unintended consequences.
+- **Mitigation**: Discuss how such vulnerabilities can be mitigated, such as by disabling Set-UID on scripts or using more secure programming practices.
+
+---
+
+### **Conclusion**
+This lab provides hands-on experience with Set-UID programs, DASH's security mechanisms, and crafting exploits. By understanding these concepts, students will gain a deeper appreciation for system security and the importance of secure coding practices.
